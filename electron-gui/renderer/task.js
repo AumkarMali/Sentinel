@@ -79,12 +79,12 @@ function stopAgent() {
   window.api.stopAgent();
 }
 
-goBtn.addEventListener('click', () => {
-  running ? stopAgent() : startAgent();
-});
-
-taskInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !running) startAgent();
+// Form submit: Enter or clicking Start sends the task to the agent
+const taskForm = document.getElementById('taskForm');
+taskForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (running) stopAgent();
+  else startAgent();
 });
 
 closeBtn.addEventListener('click', () => {

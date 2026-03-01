@@ -1,6 +1,4 @@
 const closeBtn = document.getElementById('closeBtn');
-const localToggle = document.getElementById('localToggle');
-const localSwitch = document.getElementById('localToggleSwitch');
 const apiKeyInput = document.getElementById('apiKeyInput');
 const showKeyBtn = document.getElementById('showKeyBtn');
 const modelSelect = document.getElementById('modelSelect');
@@ -17,19 +15,15 @@ const contrastValue = document.getElementById('contrastValue');
 const contrastPreview = document.getElementById('contrastPreview');
 const saveBtn = document.getElementById('saveBtn');
 
-let useLocal = true;
 let keyVisible = false;
 
-// ── Load config ──
+// ── Load config (same keys as gui.py / agent_backend) ──
 
 async function loadSettings() {
   const cfg = await window.api.getConfig();
 
-  useLocal = cfg.use_local_model !== false;
-  localSwitch.classList.toggle('active', useLocal);
-
-  apiKeyInput.value = cfg.claude_api_key || cfg.api_key || '';
-  modelSelect.value = cfg.claude_model || cfg.model || 'qwen-vl-max';
+  apiKeyInput.value = cfg.gemini_api_key || cfg.api_key || '';
+  modelSelect.value = cfg.gemini_model || cfg.model || 'gemini-2.0-flash';
 
   if (cfg.yolo_confidence != null) confSlider.value = cfg.yolo_confidence;
   if (cfg.stockfish_depth != null) depthSlider.value = cfg.stockfish_depth;
@@ -42,13 +36,6 @@ async function loadSettings() {
 }
 
 loadSettings();
-
-// ── Toggle ──
-
-localToggle.addEventListener('click', () => {
-  useLocal = !useLocal;
-  localSwitch.classList.toggle('active', useLocal);
-});
 
 // ── Show/hide API key ──
 
@@ -100,9 +87,8 @@ updateContrastPreview();
 
 saveBtn.addEventListener('click', async () => {
   await window.api.saveConfig({
-    use_local_model: useLocal,
-    claude_api_key: apiKeyInput.value.trim(),
-    claude_model: modelSelect.value,
+    gemini_api_key: apiKeyInput.value.trim(),
+    gemini_model: modelSelect.value,
     yolo_confidence: parseFloat(confSlider.value),
     stockfish_depth: parseInt(depthSlider.value),
     scan_interval: parseFloat(intervalSlider.value),

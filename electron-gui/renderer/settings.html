@@ -97,45 +97,35 @@
     </div>
 
     <div class="panel-body">
-      <!-- Vision model section -->
-      <div class="section-title">Vision Model</div>
-
-      <div class="toggle-row" id="localToggle">
-        <div class="toggle active" id="localToggleSwitch"></div>
-        <span class="toggle-label">Use local Qwen3-VL-8B (free, no key)</span>
-      </div>
-
-      <div class="spacer"></div>
-
+      <!-- Vision model (same as gui.py: Gemini only) -->
+      <div class="section-title">Vision Model (Gemini)</div>
       <div class="field-group">
-        <span class="label">DashScope API Key</span>
+        <span class="label">Gemini API Key</span>
         <div class="key-row">
           <input type="password" class="input-field" id="apiKeyInput"
-                 placeholder="sk-..." spellcheck="false" autocomplete="off">
+                 placeholder="Get key: https://aistudio.google.com/apikey" spellcheck="false" autocomplete="off">
           <button class="btn btn-ghost show-btn" id="showKeyBtn">Show</button>
         </div>
       </div>
-
       <div class="field-group">
         <span class="label">Model</span>
         <select class="input-field" id="modelSelect">
-          <option value="qwen-vl-max">qwen-vl-max</option>
-          <option value="qwen-vl-plus">qwen-vl-plus</option>
-          <option value="qwen2-vl-72b-instruct">qwen2-vl-72b-instruct</option>
-          <option value="qwen2-vl-7b-instruct">qwen2-vl-7b-instruct</option>
+          <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+          <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+          <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+          <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+          <option value="gemini-1.5-pro">gemini-1.5-pro</option>
         </select>
       </div>
-
       <div class="divider"></div>
 
-      <!-- Chess section -->
+      <!-- Chess section (same as gui.py) -->
       <div class="section-title">Chess Agent</div>
-
       <div class="field-group">
         <span class="label">YOLO Confidence</span>
         <div class="slider-container">
-          <input type="range" id="confSlider" min="0.10" max="0.95" step="0.05" value="0.30">
-          <span class="slider-value" id="confValue">0.30</span>
+          <input type="range" id="confSlider" min="0.10" max="0.95" step="0.05" value="0.15">
+          <span class="slider-value" id="confValue">0.15</span>
         </div>
       </div>
 

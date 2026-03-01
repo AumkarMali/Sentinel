@@ -5,6 +5,8 @@ const { spawn } = require('child_process');
 
 const PROJECT_ROOT = path.join(__dirname, '..');
 const CONFIG_PATH = path.join(PROJECT_ROOT, 'config.json');
+// gui.py watches this file; when you send a task from Electron we write here and gui.py runs it.
+const TASK_PENDING_PATH = path.join(PROJECT_ROOT, 'task_pending.txt');
 
 let dotWindow = null;
 let taskWindow = null;
@@ -191,7 +193,8 @@ function hideBorder() {
   }
 }
 
-// ── Agent process (spawns gui.py --task in the background) ──
+// ── Agent process (spawns agent_backend.py — headless, no Python GUI) ──
+// Hides task + dot windows before spawn so screenshots don’t include the app; shows them again on exit.
 
 function sendToTask(data) {
   if (taskWindow && !taskWindow.isDestroyed()) {
@@ -199,41 +202,42 @@ function sendToTask(data) {
   }
 }
 
+function showAgentWindows() {
+  if (taskWindow && !taskWindow.isDestroyed()) taskWindow.show();
+  if (dotWindow && !dotWindow.isDestroyed()) dotWindow.show();
+}
+
+function hideAgentWindows() {
+  if (taskWindow && !taskWindow.isDestroyed()) taskWindow.hide();
+  if (dotWindow && !dotWindow.isDestroyed()) dotWindow.hide();
+}
+
+// No process spawn: you run gui.py yourself. We just write the task to a file gui.py watches.
 function startAgent(task) {
-  if (agentProcess) {
-    sendToTask({ type: 'log', msg: 'Agent already running.', tag: 'warning' });
-    return;
+  try {
+    fs.writeFileSync(TASK_PENDING_PATH, (task || '').trim() + '\n', 'utf8');
+    sendToTask({ type: 'log', msg: 'Task sent to gui.py. Make sure gui.py is running.', tag: 'info' });
+    sendToTask({ type: 'done', message: 'Sent' });
+  } catch (e) {
+    sendToTask({ type: 'log', msg: 'Failed to write task file: ' + e.message, tag: 'error' });
+    sendToTask({ type: 'done', message: 'Error' });
   }
+}
 
-  const pythonExe = path.join(PROJECT_ROOT, 'venv', 'Scripts', 'python.exe');
+function ensureAgentProcess() {
+  if (agentProcess) return;
+  const venvExe = path.join(PROJECT_ROOT, 'venv', 'Scripts', 'python.exe');
+  const dotVenvExe = path.join(PROJECT_ROOT, '.venv', 'Scripts', 'python.exe');
   const script = path.join(PROJECT_ROOT, 'gui.py');
-  const exe = fs.existsSync(pythonExe) ? pythonExe : 'python';
-
-  agentProcess = spawn(exe, [script, '--task-headless', task], {
+  const exe = fs.existsSync(dotVenvExe) ? dotVenvExe : (fs.existsSync(venvExe) ? venvExe : 'python');
+  agentProcess = spawn(exe, [script], {
     cwd: PROJECT_ROOT,
     env: { ...process.env },
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
-
-  agentProcess.stdout.on('data', (buf) => {
-    const lines = buf.toString().split('\n').filter(Boolean);
-    for (const line of lines) {
-      try {
-        const data = JSON.parse(line);
-        sendToTask(data);
-      } catch (_) {
-        sendToTask({ type: 'log', msg: line, tag: '' });
-      }
-    }
-  });
-
-  agentProcess.stderr.on('data', (buf) => {
-    sendToTask({ type: 'log', msg: buf.toString(), tag: 'error' });
-  });
-
-  agentProcess.on('close', (code) => {
-    agentProcess = null;
-    sendToTask({ type: 'done', message: code === 0 ? 'Done' : `Exited (${code})` });
-  });
+  agentProcess.stdout.on('data', (buf) => { process.stdout.write(buf); });
+  agentProcess.stderr.on('data', (buf) => { process.stderr.write(buf); });
+  agentProcess.on('close', (code) => { agentProcess = null; });
 }
 
 function killAgent() {
@@ -241,6 +245,9 @@ function killAgent() {
     agentProcess.kill();
     agentProcess = null;
   }
+  try {
+    if (fs.existsSync(TASK_PENDING_PATH)) fs.unlinkSync(TASK_PENDING_PATH);
+  } catch (_) {}
 }
 
 // ── IPC ──
@@ -324,6 +331,7 @@ ipcMain.on('stop-agent', () => {
 app.whenReady().then(() => {
   createBorderWindow();
   createDotWindow();
+  ensureAgentProcess();
 });
 
 app.on('window-all-closed', () => {

@@ -187,13 +187,13 @@
     </div>
 
     <div class="panel-body">
-      <!-- Task input -->
-      <div class="input-row">
+      <!-- Task input: form so Enter sends task to agent -->
+      <form class="input-row" id="taskForm" autocomplete="off">
         <input type="text" class="input-field" id="taskInput"
                placeholder="Type a task... e.g. &quot;play chess&quot; or &quot;open Chrome&quot;"
-               value="play chess" spellcheck="false" autocomplete="off">
-        <button class="btn btn-primary" id="goBtn">Start</button>
-      </div>
+               value="play chess" spellcheck="false" autocomplete="off" name="task">
+        <button type="submit" class="btn btn-primary" id="goBtn">Start</button>
+      </form>
 
       <!-- Stats -->
       <div class="stats-bar" id="statsBar">

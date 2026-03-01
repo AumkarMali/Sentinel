@@ -8,6 +8,7 @@ env/
 .env
 config.json
 prompt_history.json
+task_pending.txt
 *.egg-info/
 .eggs/
 
