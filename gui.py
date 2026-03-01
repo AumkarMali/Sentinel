@@ -336,32 +336,19 @@ def _parse_router_response(data, text: str, raw_response: str):
     return ("comment", msg or "No message from model.")
 
 
-def _build_learning_context(max_entries: int = 15):
-    """Build a string of past user feedback only (type feedback) for the model."""
+def _build_learning_context(max_entries: int = 21):
+    """Build a compact string of past user feedback for the model."""
     history = _load_prompt_history()
-    out = []
     feedback_entries = [e for e in history if e.get("type") == "feedback"][-max_entries:]
-    if feedback_entries:
-        out.append("LEARNING FROM USER FEEDBACK — you MUST apply these corrections. Ignoring them has caused repeated user corrections:")
-        for e in feedback_entries:
-            user_msg = (e.get("user_message") or e.get("task") or "?")[:80]
-            fb = e.get("feedback", {})
-            if isinstance(fb, dict):
-                wrong = (fb.get("what_was_wrong") or "").strip()[:400]
-                approach = (fb.get("correct_approach") or "").strip()[:400]
-                correction = (fb.get("user_correction") or "").strip()[:200]
-                block = [f"User: \"{user_msg}\""]
-                if correction:
-                    block.append(f"Correction: {correction}")
-                if wrong:
-                    block.append(f"What was wrong: {wrong}")
-                if approach:
-                    block.append(f"Correct approach: {approach}")
-                out.append("\n".join(block))
-            else:
-                out.append(f"User: \"{user_msg}\" → {str(fb)[:200]}")
-        out.append("Apply the correct_approach from the feedback above when making decisions (e.g. for chess, determine playing_as only from the bottom two rows of the board).")
-    return "\n".join(out) if out else ""
+    if not feedback_entries:
+        return ""
+    lines = ["RULES FROM USER FEEDBACK (follow these):"]
+    for e in feedback_entries:
+        task = (e.get("task") or "?")[:40]
+        fb = e.get("feedback", {})
+        correction = (fb.get("user_correction") or str(fb)).strip()[:150] if isinstance(fb, dict) else str(fb)[:150]
+        lines.append(f"• {task}: {correction}")
+    return "\n".join(lines)
 
 
 # ── action executor (mouse + keyboard) ──

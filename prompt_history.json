@@ -1,212 +1,149 @@
 [
   {
     "type": "feedback",
-    "task": "Open a new tab in Chrome",
-    "user_message": "Open a new tab",
+    "task": "Open new tab",
     "feedback": {
-      "what_was_wrong": "Tried to use KEYS with Win key to open Chrome, or tried to click the + button with wrong coordinates.",
-      "correct_approach": "If Chrome is already open and visible, use KEYS with [\"ctrl\", \"t\"] to open a new tab instantly. Do NOT try to click the tiny + tab button — keyboard shortcut is faster and always works. If Chrome is not open, use OPEN_APP with program 'Chrome' first, then KEYS ctrl+t.",
-      "user_correction": "Just press Ctrl+T to open a new tab. Don't click things when a keyboard shortcut exists."
+      "user_correction": "Use KEYS [\"ctrl\",\"t\"]. Don't click the + button."
     }
   },
   {
     "type": "feedback",
-    "task": "Click a button on a webpage",
-    "user_message": "Click the Play button",
+    "task": "Click a button",
     "feedback": {
-      "what_was_wrong": "Guessed the button coordinates instead of reading them from the grid. Cursor ended up 50-100px away from the actual button and clicked on empty space.",
-      "correct_approach": "FIRST check if the button name appears in the UI elements list — if yes, use CLICK with the element name (e.g. {\"action\": \"CLICK\", \"parameters\": {\"element\": \"Play\"}}). This is the MOST reliable method. If the element is NOT in the list, carefully read the grid: find the grid line just left of the button center (e.g. x=350), estimate offset right (e.g. +20 → x=370), find grid line just above (e.g. y=400), estimate offset down (e.g. +15 → y=415), then use CLICK_XY with those exact coordinates.",
-      "user_correction": "Use CLICK by element name when available. If using coordinates, actually read the grid lines — don't guess."
+      "user_correction": "Prefer CLICK by element name. For CLICK_XY, read grid lines carefully — don't guess coordinates."
     }
   },
   {
     "type": "feedback",
     "task": "Navigate to a website",
-    "user_message": "Go to chess.com",
     "feedback": {
-      "what_was_wrong": "Tried to click the address bar by guessing coordinates, then typed the URL. Wasted multiple turns and often missed the address bar.",
-      "correct_approach": "If a browser is already open, the fastest way to navigate is: KEYS [\"ctrl\", \"l\"] to focus the address bar (works in all browsers), then TYPE_TEXT with the URL, then KEYS [\"enter\"]. If no browser is open, use OPEN_URL directly: {\"action\": \"OPEN_URL\", \"parameters\": {\"url\": \"chess.com\"}}. Never try to click the address bar manually.",
-      "user_correction": "Use Ctrl+L to focus the address bar, or use OPEN_URL. Don't click the address bar."
+      "user_correction": "KEYS [\"ctrl\",\"l\"] to focus address bar, TYPE_TEXT url, KEYS [\"enter\"]. Or use OPEN_URL."
     }
   },
   {
     "type": "feedback",
-    "task": "Close a tab in the browser",
-    "user_message": "Close this tab",
+    "task": "Close a tab",
     "feedback": {
-      "what_was_wrong": "Tried to click the tiny X on the tab, missed repeatedly.",
-      "correct_approach": "Use KEYS [\"ctrl\", \"w\"] to close the current tab. This is instant and never misses. Do not try to click the small X button on tabs.",
-      "user_correction": "Ctrl+W closes a tab. Use keyboard shortcuts for small targets."
+      "user_correction": "KEYS [\"ctrl\",\"w\"]. Don't click the tiny X."
     }
   },
   {
     "type": "feedback",
-    "task": "Switch between tabs",
-    "user_message": "Go to the other tab",
+    "task": "Switch tabs",
     "feedback": {
-      "what_was_wrong": "Tried to click on tab headers and missed because they are small targets.",
-      "correct_approach": "Use KEYS [\"ctrl\", \"tab\"] to switch to the next tab, or KEYS [\"ctrl\", \"shift\", \"tab\"] for the previous tab. For a specific tab number use KEYS [\"ctrl\", \"1\"] through [\"ctrl\", \"9\"]. Much more reliable than clicking.",
-      "user_correction": "Use Ctrl+Tab to switch tabs. Don't click on tab headers."
+      "user_correction": "KEYS [\"ctrl\",\"tab\"] for next tab. KEYS [\"ctrl\",\"1\"] through [\"ctrl\",\"9\"] for specific tabs."
     }
   },
   {
     "type": "feedback",
-    "task": "Scroll down on a page",
-    "user_message": "Scroll down to see more",
+    "task": "Scroll down",
     "feedback": {
-      "what_was_wrong": "Did not scroll and tried to click elements that were off-screen, or used wrong scroll method.",
-      "correct_approach": "Use KEYS [\"pgdn\"] for a large scroll, or KEYS [\"down\"] for small scrolls. KEYS [\"space\"] also scrolls down in browsers. KEYS [\"end\"] goes to the bottom of the page. KEYS [\"home\"] goes to the top. If an element is not visible in the screenshot, scroll first before trying to interact with it.",
-      "user_correction": "Use Page Down or arrow keys to scroll. Don't try to click things that aren't visible."
+      "user_correction": "KEYS [\"pgdn\"] or [\"down\"] or [\"space\"]. Don't click things that aren't visible — scroll first."
     }
   },
   {
     "type": "feedback",
-    "task": "Type text into a search box",
-    "user_message": "Search for something on Google",
+    "task": "Type in a search box",
     "feedback": {
-      "what_was_wrong": "Tried to click the search box by coordinates, missed, then typed text that went to the wrong place.",
-      "correct_approach": "On Google's homepage, the search box is usually the main focused element. Try TYPE_IN with element name if available: {\"action\": \"TYPE_IN\", \"parameters\": {\"element\": \"Search\", \"text\": \"query\"}}. If that's not available, click the search box using CLICK by element name first, verify the cursor is in the box (look for blinking caret in next screenshot), THEN use TYPE_TEXT. On most search engines, you can also just start typing if the search box is already focused.",
-      "user_correction": "Use TYPE_IN when you can. Always verify the text field is focused before typing."
+      "user_correction": "Use TYPE_IN with element name. If not available, CLICK the field first, verify focus, then TYPE_TEXT."
     }
   },
   {
     "type": "feedback",
-    "task": "Click a link on a webpage",
-    "user_message": "Click the login link",
+    "task": "Click a link",
     "feedback": {
-      "what_was_wrong": "Clicked in the general area of the link but missed because coordinates were off by 30-50px. Kept clicking the same wrong spot.",
-      "correct_approach": "For links and text buttons: read the grid carefully. The link text tells you roughly where it is, but you need precise coordinates. Find which 50px grid cell the link text falls in, estimate its center within that cell. If CLICK by element name is available (check UI elements list), always prefer that. After clicking, CHECK THE NEXT SCREENSHOT — if the page didn't change, the click missed and you need to adjust coordinates or use a different method.",
-      "user_correction": "Check if the click actually worked by looking at the next screenshot. If nothing changed, adjust your approach."
+      "user_correction": "After clicking, check next screenshot. If page didn't change, click missed — try CLICK by name or re-read grid."
     }
   },
   {
     "type": "feedback",
     "task": "Open an application",
-    "user_message": "Open Notepad",
     "feedback": {
-      "what_was_wrong": "Used KEYS with Win key to try to open the Start menu, which is blocked. Or tried to find and double-click a desktop icon.",
-      "correct_approach": "ALWAYS use OPEN_APP: {\"action\": \"OPEN_APP\", \"parameters\": {\"program\": \"Notepad\"}}. This works for any Windows application — Chrome, Edge, Notepad, Calculator, File Explorer, etc. NEVER use KEYS with Win/Windows/Super key. NEVER try to click Start menu or desktop icons. OPEN_APP handles everything.",
-      "user_correction": "Use OPEN_APP for any program. Don't use Win key or click desktop icons."
+      "user_correction": "Always use OPEN_APP. NEVER use KEYS with Win key. NEVER click desktop icons or Start menu."
     }
   },
   {
     "type": "feedback",
-    "task": "Go back to previous page in browser",
-    "user_message": "Go back",
+    "task": "Go back in browser",
     "feedback": {
-      "what_was_wrong": "Tried to click the browser's back arrow button and missed.",
-      "correct_approach": "Use KEYS [\"alt\", \"left\"] to go back in any browser. This is the keyboard shortcut for the back button and never misses. Similarly, KEYS [\"alt\", \"right\"] goes forward.",
-      "user_correction": "Alt+Left goes back. Use keyboard shortcuts instead of clicking browser navigation buttons."
+      "user_correction": "KEYS [\"alt\",\"left\"]. Don't click the back arrow button."
     }
   },
   {
     "type": "feedback",
-    "task": "Refresh a webpage",
-    "user_message": "Refresh the page",
+    "task": "Refresh page",
     "feedback": {
-      "what_was_wrong": "Tried to click the refresh button in the browser toolbar.",
-      "correct_approach": "Use KEYS [\"f5\"] or KEYS [\"ctrl\", \"r\"] to refresh. Instant and reliable. For a hard refresh (bypass cache), use KEYS [\"ctrl\", \"shift\", \"r\"].",
-      "user_correction": "F5 or Ctrl+R to refresh. Don't click the refresh button."
+      "user_correction": "KEYS [\"f5\"] or [\"ctrl\",\"r\"]. Don't click the refresh button."
     }
   },
   {
     "type": "feedback",
-    "task": "Select all text in a field",
-    "user_message": "Select all the text",
+    "task": "Select all text",
     "feedback": {
-      "what_was_wrong": "Tried to click and drag to select text, which is unreliable with coordinate-based control.",
-      "correct_approach": "Use KEYS [\"ctrl\", \"a\"] to select all text in the currently focused field or page. Then use KEYS [\"ctrl\", \"c\"] to copy, KEYS [\"ctrl\", \"x\"] to cut, or just TYPE_TEXT to replace the selection.",
-      "user_correction": "Ctrl+A selects all. Use keyboard shortcuts for text selection."
+      "user_correction": "KEYS [\"ctrl\",\"a\"]. Don't drag-select with mouse."
     }
   },
   {
     "type": "feedback",
-    "task": "Click a dropdown menu option",
-    "user_message": "Select an option from the dropdown",
+    "task": "Use a dropdown menu",
     "feedback": {
-      "what_was_wrong": "Clicked the dropdown to open it, then tried to click an option but the coordinates were wrong and the dropdown closed.",
-      "correct_approach": "After opening a dropdown (click or CLICK by element name), use KEYS [\"down\"] and [\"up\"] arrows to navigate through options, then KEYS [\"enter\"] to select. This is much more reliable than trying to click individual dropdown items by coordinates. Alternatively, if you know the option text, after opening the dropdown you can TYPE_TEXT the first few letters to jump to it.",
-      "user_correction": "Use arrow keys to navigate dropdowns after opening them. Don't try to click individual options."
+      "user_correction": "After opening dropdown, use KEYS [\"down\"]/[\"up\"] to navigate, [\"enter\"] to select. Don't click options."
     }
   },
   {
     "type": "feedback",
-    "task": "Verify a click landed correctly",
-    "user_message": "The click keeps missing",
+    "task": "Click keeps missing",
     "feedback": {
-      "what_was_wrong": "After issuing CLICK_XY, did not check the next screenshot to see if the click actually hit the target. Kept repeating the same wrong coordinates.",
-      "correct_approach": "After every CLICK_XY, look at the NEXT screenshot carefully. Signs a click worked: page changed, button state changed, new dialog appeared, cursor is inside a text field. Signs it MISSED: screen looks exactly the same as before. If it missed: 1) Try CLICK by element name if available. 2) Re-read the grid more carefully — maybe your x or y was off by 50px. 3) Try a keyboard shortcut alternative. NEVER repeat the same coordinates more than once.",
-      "user_correction": "Always check if your click worked. If the screen didn't change, the click missed — try something different."
+      "user_correction": "After CLICK_XY, check next screenshot. Same screen = missed. Try CLICK by element name, or re-read grid. Never repeat same coords."
     }
   },
   {
     "type": "feedback",
-    "task": "Interact with a dialog box or popup",
-    "user_message": "Click OK on the dialog",
+    "task": "Handle dialog box",
     "feedback": {
-      "what_was_wrong": "Tried to click OK button by coordinates and missed, or didn't notice the dialog had appeared.",
-      "correct_approach": "For dialog boxes (OK, Cancel, Yes, No, Save, etc.), first check if the button name is in the UI elements list and use CLICK by name. If not, try KEYS [\"enter\"] which confirms the default dialog button (usually OK/Yes). KEYS [\"escape\"] dismisses dialogs (Cancel/No). These keyboard shortcuts work on almost all Windows dialogs.",
-      "user_correction": "Press Enter for OK/Yes, Escape for Cancel/No on dialog boxes."
+      "user_correction": "KEYS [\"enter\"] for OK/Yes. KEYS [\"escape\"] for Cancel/No. Don't click dialog buttons."
     }
   },
   {
     "type": "feedback",
-    "task": "Zoom in or out on a page",
-    "user_message": "Make the page bigger",
+    "task": "Find text on page",
     "feedback": {
-      "what_was_wrong": "Did not know how to zoom.",
-      "correct_approach": "Use KEYS [\"ctrl\", \"+\"] to zoom in and KEYS [\"ctrl\", \"-\"] to zoom out. KEYS [\"ctrl\", \"0\"] resets to default zoom. Works in browsers and most applications.",
-      "user_correction": "Ctrl+Plus zooms in, Ctrl+Minus zooms out."
+      "user_correction": "KEYS [\"ctrl\",\"f\"], TYPE_TEXT the term, KEYS [\"enter\"] for next match. Don't scroll looking manually."
     }
   },
   {
     "type": "feedback",
-    "task": "Find text on a page",
-    "user_message": "Find the word Settings on this page",
+    "task": "Right-click something",
     "feedback": {
-      "what_was_wrong": "Tried to visually scan and scroll through the page looking for text.",
-      "correct_approach": "Use KEYS [\"ctrl\", \"f\"] to open the Find bar, then TYPE_TEXT the search term. The browser will highlight and scroll to the match. Press KEYS [\"enter\"] to go to the next match. KEYS [\"escape\"] to close the Find bar.",
-      "user_correction": "Ctrl+F to find text on any page. Don't scroll around looking for it manually."
+      "user_correction": "Position cursor with CLICK_XY, then KEYS [\"shift\",\"f10\"] for context menu. Navigate with arrows + enter."
     }
   },
   {
     "type": "feedback",
-    "task": "Right-click on something",
-    "user_message": "Right click on the image",
+    "task": "Maximize window",
     "feedback": {
-      "what_was_wrong": "No right-click action was available or tried to use an unsupported action.",
-      "correct_approach": "There is no direct RIGHT_CLICK action. To simulate a right-click context menu, first MOVE_TO or CLICK_XY to position the cursor on the target, then use KEYS [\"shift\", \"f10\"] or KEYS [\"apps\"] (the context menu key). This opens the right-click menu on Windows. Then navigate with arrow keys and Enter.",
-      "user_correction": "Use Shift+F10 to open right-click menu after positioning cursor on the target."
+      "user_correction": "KEYS [\"alt\",\"space\"] then [\"x\"]. Or KEYS [\"f11\"] for fullscreen in browsers."
     }
   },
   {
     "type": "feedback",
-    "task": "Maximize or minimize a window",
-    "user_message": "Maximize this window",
+    "task": "Copy and paste",
     "feedback": {
-      "what_was_wrong": "Tried to click the maximize button in the title bar and missed.",
-      "correct_approach": "To maximize: double-click the title bar is unreliable, instead use KEYS [\"win\"] — wait, Win is blocked. Use KEYS [\"alt\", \"space\"] to open the window system menu, then KEYS [\"x\"] for maximize, [\"n\"] for minimize, [\"r\"] for restore. Alternatively, KEYS [\"f11\"] toggles fullscreen in browsers.",
-      "user_correction": "Alt+Space then X to maximize. F11 for fullscreen in browsers."
+      "user_correction": "KEYS [\"ctrl\",\"a\"] select, [\"ctrl\",\"c\"] copy, [\"ctrl\",\"v\"] paste. Don't drag-select."
     }
   },
   {
     "type": "feedback",
-    "task": "Copy and paste text",
-    "user_message": "Copy this and paste it there",
+    "task": "Grid coordinate reading",
     "feedback": {
-      "what_was_wrong": "Tried to use mouse drag to select text, which is very unreliable with coordinate control.",
-      "correct_approach": "To copy: first focus the text (click in the field or use Tab), KEYS [\"ctrl\", \"a\"] to select all, KEYS [\"ctrl\", \"c\"] to copy. To paste: click in the destination field (or use Tab to get there), KEYS [\"ctrl\", \"v\"] to paste. For partial text selection, use KEYS [\"shift\", \"home\"] or [\"shift\", \"end\"] combined with arrow keys.",
-      "user_correction": "Ctrl+A, Ctrl+C, Ctrl+V for select-all, copy, paste. Don't try to drag-select."
+      "user_correction": "X = horizontal (top labels). Y = vertical (left labels). Find nearest grid lines, interpolate center. State coords in <thinking> before acting."
     }
   },
   {
     "type": "feedback",
-    "task": "Reading grid coordinates accurately",
-    "user_message": "The agent keeps clicking in the wrong spot",
+    "task": "General rule",
     "feedback": {
-      "what_was_wrong": "The model was reading grid coordinates incorrectly — either mixing up x and y, reading the wrong grid line, or not interpolating within the grid cell properly. This caused clicks to land 50-100px away from the intended target.",
-      "correct_approach": "Grid reading process: (1) X-axis labels are along the TOP of the image: 0, 50, 100, 150... These tell you horizontal position. (2) Y-axis labels are along the LEFT side: 0, 50, 100, 150... These tell you vertical position. (3) To find a button's x: look at which vertical grid lines it falls between, e.g. between 300 and 350, center is roughly at x=325. (4) To find its y: look at which horizontal grid lines it falls between, e.g. between 200 and 250, center is roughly at y=225. (5) Always state coordinates in <thinking> before the action. Double-check: does x make sense horizontally? Does y make sense vertically?",
-      "user_correction": "X is horizontal (top labels), Y is vertical (left labels). Read both carefully and double-check before clicking."
+      "user_correction": "Keyboard shortcuts are ALWAYS more reliable than clicking small UI targets. Use them whenever possible."
     }
   }
 ]
