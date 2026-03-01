@@ -1,18 +1,19 @@
 const { app, BrowserWindow, ipcMain, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const readline = require('readline');
 const { spawn } = require('child_process');
 
 const PROJECT_ROOT = path.join(__dirname, '..');
 const CONFIG_PATH = path.join(PROJECT_ROOT, 'config.json');
-// gui.py watches this file; when you send a task from Electron we write here and gui.py runs it.
-const TASK_PENDING_PATH = path.join(PROJECT_ROOT, 'task_pending.txt');
 
 let dotWindow = null;
 let taskWindow = null;
 let settingsWindow = null;
 let borderWindow = null;
 let agentProcess = null;
+let agentStdin = null;
+let agentRunning = false;
 
 const DOT_SIZE = 80;
 const EXPANDED_SIZE = 480;
@@ -193,8 +194,7 @@ function hideBorder() {
   }
 }
 
-// ── Agent process (spawns agent_backend.py — headless, no Python GUI) ──
-// Hides task + dot windows before spawn so screenshots don’t include the app; shows them again on exit.
+// ── Agent process (spawns gui.py --stdin, pipes stdin/stdout) ──
 
 function sendToTask(data) {
   if (taskWindow && !taskWindow.isDestroyed()) {
@@ -202,52 +202,124 @@ function sendToTask(data) {
   }
 }
 
+function hideAgentWindows() {
+  if (taskWindow && !taskWindow.isDestroyed()) taskWindow.hide();
+  if (dotWindow && !dotWindow.isDestroyed()) dotWindow.hide();
+  if (borderWindow && !borderWindow.isDestroyed()) borderWindow.hide();
+}
+
 function showAgentWindows() {
   if (taskWindow && !taskWindow.isDestroyed()) taskWindow.show();
   if (dotWindow && !dotWindow.isDestroyed()) dotWindow.show();
 }
 
-function hideAgentWindows() {
-  if (taskWindow && !taskWindow.isDestroyed()) taskWindow.hide();
-  if (dotWindow && !dotWindow.isDestroyed()) dotWindow.hide();
-}
-
-// No process spawn: you run gui.py yourself. We just write the task to a file gui.py watches.
-function startAgent(task) {
-  try {
-    fs.writeFileSync(TASK_PENDING_PATH, (task || '').trim() + '\n', 'utf8');
-    sendToTask({ type: 'log', msg: 'Task sent to gui.py. Make sure gui.py is running.', tag: 'info' });
-    sendToTask({ type: 'done', message: 'Sent' });
-  } catch (e) {
-    sendToTask({ type: 'log', msg: 'Failed to write task file: ' + e.message, tag: 'error' });
-    sendToTask({ type: 'done', message: 'Error' });
-  }
+function findPython() {
+  const venvExe = path.join(PROJECT_ROOT, 'venv', 'Scripts', 'python.exe');
+  const dotVenvExe = path.join(PROJECT_ROOT, '.venv', 'Scripts', 'python.exe');
+  if (fs.existsSync(dotVenvExe)) return dotVenvExe;
+  if (fs.existsSync(venvExe)) return venvExe;
+  return 'python';
 }
 
 function ensureAgentProcess() {
   if (agentProcess) return;
-  const venvExe = path.join(PROJECT_ROOT, 'venv', 'Scripts', 'python.exe');
-  const dotVenvExe = path.join(PROJECT_ROOT, '.venv', 'Scripts', 'python.exe');
+
+  const exe = findPython();
   const script = path.join(PROJECT_ROOT, 'gui.py');
-  const exe = fs.existsSync(dotVenvExe) ? dotVenvExe : (fs.existsSync(venvExe) ? venvExe : 'python');
-  agentProcess = spawn(exe, [script], {
+
+  agentProcess = spawn(exe, [script, '--stdin'], {
     cwd: PROJECT_ROOT,
     env: { ...process.env },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
-  agentProcess.stdout.on('data', (buf) => { process.stdout.write(buf); });
-  agentProcess.stderr.on('data', (buf) => { process.stderr.write(buf); });
-  agentProcess.on('close', (code) => { agentProcess = null; });
+
+  agentStdin = agentProcess.stdin;
+
+  const TAG_PREFIX = {
+    header: '===', action: '>>>', error: 'ERR', warning: 'WRN',
+    info: '   ', thought: ' * ', dim: '   ', move: ' ♟ ', piece: ' ♟ ',
+    board: '   ', result: '   ',
+  };
+
+  const rl = readline.createInterface({ input: agentProcess.stdout });
+  rl.on('line', (line) => {
+    try {
+      const data = JSON.parse(line);
+      sendToTask(data);
+
+      if (data.type === 'hide_windows') {
+        hideAgentWindows();
+      } else if (data.type === 'show_windows') {
+        showAgentWindows();
+      } else if (data.type === 'done') {
+        agentRunning = false;
+        showAgentWindows();
+        const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+        process.stdout.write(`[${ts}] === DONE: ${data.message || 'Task finished'}\n`);
+      } else if (data.type === 'log' && data.msg) {
+        const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+        const prefix = TAG_PREFIX[data.tag] || '   ';
+        process.stdout.write(`[${ts}] ${prefix} ${data.msg}\n`);
+      }
+    } catch (_) {
+      process.stdout.write(line + '\n');
+      sendToTask({ type: 'log', msg: line, tag: 'dim' });
+    }
+  });
+
+  agentProcess.stderr.on('data', (buf) => {
+    const text = buf.toString().trim();
+    if (text) {
+      const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+      process.stderr.write(`[${ts}] ERR ${text}\n`);
+      sendToTask({ type: 'log', msg: text, tag: 'error' });
+    }
+  });
+
+  agentProcess.on('close', (code) => {
+    agentProcess = null;
+    agentStdin = null;
+    agentRunning = false;
+    if (code !== 0 && code !== null) {
+      sendToTask({ type: 'log', msg: `Agent process exited with code ${code}`, tag: 'error' });
+    }
+    sendToTask({ type: 'done', message: 'Agent stopped' });
+  });
+}
+
+function startAgent(task) {
+  ensureAgentProcess();
+
+  if (!agentStdin) {
+    sendToTask({ type: 'log', msg: 'Agent process not available — restarting...', tag: 'warning' });
+    ensureAgentProcess();
+    if (!agentStdin) {
+      sendToTask({ type: 'log', msg: 'Failed to start agent process.', tag: 'error' });
+      sendToTask({ type: 'done', message: 'Error' });
+      return;
+    }
+  }
+
+  agentRunning = true;
+  agentStdin.write((task || '').trim() + '\n');
+  sendToTask({ type: 'log', msg: `Task started: ${task}`, tag: 'header' });
 }
 
 function killAgent() {
+  agentRunning = false;
   if (agentProcess) {
-    agentProcess.kill();
+    const pid = agentProcess.pid;
+    try {
+      // On Windows, kill the entire process tree so Python subprocesses die too
+      if (process.platform === 'win32') {
+        require('child_process').execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
+      } else {
+        agentProcess.kill('SIGKILL');
+      }
+    } catch (_) {}
     agentProcess = null;
+    agentStdin = null;
   }
-  try {
-    if (fs.existsSync(TASK_PENDING_PATH)) fs.unlinkSync(TASK_PENDING_PATH);
-  } catch (_) {}
 }
 
 // ── IPC ──
@@ -332,6 +404,10 @@ app.whenReady().then(() => {
   createBorderWindow();
   createDotWindow();
   ensureAgentProcess();
+});
+
+app.on('before-quit', () => {
+  killAgent();
 });
 
 app.on('window-all-closed', () => {

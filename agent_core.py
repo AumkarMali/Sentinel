@@ -310,6 +310,23 @@ def _execute_action(action_dict: dict, screen_w: int, screen_h: int) -> tuple:
                 if el:
                     return _open_app_via_start(el)
             return False, msg
+        if action == "CLICK_XY":
+            x, y = params.get("x"), params.get("y")
+            if x is None or y is None:
+                return False, "CLICK_XY requires x and y"
+            try:
+                x, y = int(x), int(y)
+            except (TypeError, ValueError):
+                return False, "CLICK_XY x,y must be numbers"
+            scale = 1024 / max(screen_w, screen_h) if max(screen_w, screen_h) > 1024 else 1.0
+            model_w = max(1, int(screen_w * scale))
+            model_h = max(1, int(screen_h * scale))
+            actual_x = max(0, min(screen_w - 1, int(round(x * screen_w / model_w))))
+            actual_y = max(0, min(screen_h - 1, int(round(y * screen_h / model_h))))
+            _move_cursor(actual_x, actual_y)
+            time.sleep(0.1)
+            pyautogui.click(actual_x, actual_y)
+            return True, f"Clicked at ({actual_x}, {actual_y})"
         if action == "MOVE_TO":
             x, y = params.get("x"), params.get("y")
             if x is None or y is None:
@@ -370,7 +387,18 @@ def _execute_action(action_dict: dict, screen_w: int, screen_h: int) -> tuple:
             return True, f"Typed: {text[:50]}..."
         if action == "TASK_COMPLETE":
             return True, params.get("message", "Task complete")
-        if action in ("CLICK", "DOUBLE_CLICK", "TYPE_IN", "MENU") and not _PYWINAUTO_OK:
+        if action == "TYPE_IN":
+            # Fallback: just type the text without pywinauto
+            text = (params.get("text") or params.get("value") or "")
+            if text:
+                if sys.platform == "win32" and _PYNPUT_AVAILABLE:
+                    kb = PynputController()
+                    kb.type(text)
+                else:
+                    pyautogui.write(text, interval=0.05)
+                return True, f"Typed: {text[:50]}"
+            return False, "TYPE_IN: no text provided"
+        if action in ("CLICK", "DOUBLE_CLICK", "MENU") and not _PYWINAUTO_OK:
             return False, "pywinauto not available"
         return False, f"Unknown action: {action}"
     except Exception as e:
@@ -467,7 +495,21 @@ GEMINI_MODELS = [
 ACTION_SYSTEM_TAIL = """
 CRITICAL - Your reply MUST start with <thinking>...</thinking> then one JSON line.
 COORDINATE GRID: Use grid labels to derive MOVE_TO coordinates. CLICK_CURRENT only when crosshair is centered ON the target.
-OPEN_APP — Windows programs only. OPEN_URL — when browser is open. MOVE_TO then CLICK_CURRENT for buttons.
+OPEN_APP — Windows programs only (chrome, notepad, etc). OPEN_URL — navigate browser to a URL. MOVE_TO then CLICK_CURRENT for clicking buttons.
 When a chess BOARD is visible: return {"action": "start_chess", "parameters": {"reason": "Board visible", "playing_as": "white" or "black"}}. playing_as = color at BOTTOM of board.
-Actions: OPEN_APP, OPEN_URL, MOVE_TO, CLICK_CURRENT, CLICK, KEYS, TYPE_TEXT, TASK_COMPLETE, SCREEN_LOADING, start_chess.
+When the task is fully complete: return {"action": "TASK_COMPLETE", "parameters": {"message": "Done"}}
+
+Available actions (pick ONE per turn):
+  OPEN_APP    {"action": "OPEN_APP", "parameters": {"app": "chrome"}}
+  OPEN_URL    {"action": "OPEN_URL", "parameters": {"url": "youtube.com"}}
+  MOVE_TO     {"action": "MOVE_TO", "parameters": {"x": 400, "y": 300}}
+  CLICK_CURRENT {"action": "CLICK_CURRENT", "parameters": {}}
+  CLICK       {"action": "CLICK", "parameters": {"x": 400, "y": 300}}
+  CLICK_XY    {"action": "CLICK_XY", "parameters": {"x": 400, "y": 300}}
+  TYPE_TEXT   {"action": "TYPE_TEXT", "parameters": {"text": "hello"}}
+  TYPE_IN     {"action": "TYPE_IN", "parameters": {"text": "hello"}}
+  KEYS        {"action": "KEYS", "parameters": {"keys": ["ctrl", "t"]}}
+  DOUBLE_CLICK {"action": "DOUBLE_CLICK", "parameters": {"x": 400, "y": 300}}
+  TASK_COMPLETE {"action": "TASK_COMPLETE", "parameters": {"message": "Done"}}
+  SCREEN_LOADING {"action": "SCREEN_LOADING", "parameters": {}}
 CRITICAL — Never use KEYS to open apps. Use OPEN_APP."""

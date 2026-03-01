@@ -1,6 +1,6 @@
 """
 Headless agent runner (no tkinter). Used by Electron: takes a task, runs the full flow,
-logs JSON lines to stdout. Electron hides its windows before spawning so screenshots are clean.
+logs JSON lines to stdout. Electron hides/shows its windows around screenshots via protocol messages.
 """
 import json
 import re
@@ -9,6 +9,18 @@ import time
 
 import pyautogui
 
+
+def _signal_hide():
+    """Tell Electron to hide its overlay windows before a screenshot."""
+    print(json.dumps({"type": "hide_windows"}), flush=True)
+    time.sleep(0.15)
+
+
+def _signal_show():
+    """Tell Electron to show its overlay windows after a screenshot."""
+    print(json.dumps({"type": "show_windows"}), flush=True)
+
+
 from agent_core import (
     _build_learning_context,
     _execute_action,
@@ -16,56 +28,14 @@ from agent_core import (
     _open_program,
     _open_url,
     _parse_json,
-    _parse_router_response,
     _prepare_image_for_model,
     _save_prompt_entry,
     _take_screenshot_with_cursor,
     ACTION_SYSTEM_TAIL,
     get_ui_elements,
     GEMINI_MODELS,
-    ROUTER_SYSTEM_TAIL,
 )
 from chess_agent import ChessEngine
-
-
-def _run_router(state, task, screenshot, ui_elements=None, cursor_xy=None, screen_size=None):
-    if screen_size is None:
-        screen_size = pyautogui.size()
-    if cursor_xy is None:
-        cursor_xy = tuple(pyautogui.position())
-    img, model_w, model_h, (cur_mx, cur_my) = _prepare_image_for_model(
-        screenshot, cursor_xy, screen_size
-    )
-    learning_context = _build_learning_context()
-    system = "You are a router for an AI agent. The user will send a task and a screenshot.\n"
-    if learning_context:
-        system += learning_context + "\n\n"
-    system += ROUTER_SYSTEM_TAIL
-    user_text = f"Task: {task}\n\nLook at the screenshot and respond with JSON."
-    user_text += f"\n\nScreenshot dimensions: width={model_w} height={model_h}. Coords from 0 to {model_w-1}, 0 to {model_h-1}."
-    user_text += f"\n\n>>> CURRENT CURSOR POSITION: ({cur_mx}, {cur_my}) <<<"
-    if ui_elements:
-        user_text += "\n\nClickable UI elements:\n"
-        for item in (ui_elements or [])[:60]:
-            name = (item.get("name") or "").strip()
-            if name:
-                user_text += f'  "{name}"\n'
-    from gemini_vl import call_gemini
-    raw_response = call_gemini(
-        system, user_text, img, conversation_messages=None, max_tokens=4096,
-        api_key=state["api_key"], model=state["model"] or None,
-    )
-    text = raw_response
-    text = re.sub(r"<thinking\s*>.*?</thinking\s*>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
-    if "```" in text:
-        m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-        if m:
-            text = m.group(1)
-    data = _parse_json(text)
-    if data is None and "store_feedback" in raw_response:
-        data = _parse_json(raw_response)
-    action, payload = _parse_router_response(data, text, raw_response)
-    return (action, payload, raw_response)
 
 
 def _ask_next_action(state, task, screenshot, action_history, conversation_messages, thought_history,
@@ -104,7 +74,7 @@ def _ask_next_action(state, task, screenshot, action_history, conversation_messa
             if name:
                 user_text += f'  "{name}"\n'
     messages = list(conversation_messages or [])
-    _EXECUTE_ACTIONS = ("CLICK", "CLICK_CURRENT", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "MENU", "KEYS", "KEY_PRESS", "TYPE_TEXT", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL")
+    _EXECUTE_ACTIONS = ("CLICK", "CLICK_CURRENT", "CLICK_XY", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "TYPE_TEXT", "MENU", "KEYS", "KEY_PRESS", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL")
     def _parse_bare_action(raw):
         s = (raw or "").strip().upper().replace("-", "_")
         for a in _EXECUTE_ACTIONS:
@@ -179,6 +149,150 @@ def _ask_next_action(state, task, screenshot, action_history, conversation_messa
         return ("comment", f"API error: {e}", conversation_messages or [], thought_history or [], None)
 
 
+WEBSITE_MAP = {
+    "lichess": "lichess.org",
+    "chess.com": "chess.com",
+    "youtube": "youtube.com",
+    "google": "google.com",
+    "google docs": "docs.google.com",
+    "google doc": "docs.google.com",
+    "google slides": "slides.google.com",
+    "google slide": "slides.google.com",
+    "google sheets": "sheets.google.com",
+    "google sheet": "sheets.google.com",
+    "google drive": "drive.google.com",
+    "github": "github.com",
+    "gmail": "mail.google.com",
+    "reddit": "reddit.com",
+    "twitter": "twitter.com",
+    "twitch": "twitch.tv",
+    "spotify": "open.spotify.com",
+    "netflix": "netflix.com",
+    "chatgpt": "chat.openai.com",
+    "claude": "claude.ai",
+}
+
+APP_NAMES = {"chrome", "edge", "firefox", "notepad", "calculator", "calc", "code", "vscode", "explorer", "terminal", "cmd", "powershell", "word", "excel", "powerpoint"}
+
+
+def _try_quick_commands(task: str, task_lower: str, log) -> bool:
+    """Handle common tasks directly without a Gemini call.
+    Returns True if the task was handled, False to fall through to screen control."""
+    import webbrowser
+
+    # Split compound tasks: "open chrome and play lichess" → ["open chrome", "play lichess"]
+    parts = [p.strip() for p in re.split(r'\band\b|,', task_lower) if p.strip()]
+
+    actions_done = []
+    browser_opened = False
+
+    for part in parts:
+        part_stripped = part.strip()
+
+        # "open <app>" or "launch <app>"
+        if part_stripped.startswith("open ") or part_stripped.startswith("launch "):
+            target = part_stripped.split(" ", 1)[1].strip()
+
+            # Check if it's a known website
+            url = None
+            for name, site in WEBSITE_MAP.items():
+                if name in target:
+                    url = site
+                    break
+            if any(ind in target for ind in (".com", ".org", ".net", ".io", ".gg", ".tv", ".ai", "http")):
+                url = target if "://" in target else target
+
+            if url:
+                if not browser_opened:
+                    log(f"Opening Chrome...", "action")
+                    _open_program("chrome")
+                    browser_opened = True
+                    time.sleep(2.0)
+                log(f"Navigating to {url}...", "action")
+                ok, msg = _open_url(url)
+                log(f"  {msg}" if ok else f"  Failed: {msg}", "info" if ok else "error")
+                actions_done.append(f"opened {url}")
+                time.sleep(1.0)
+            elif target.lower() in APP_NAMES or target.lower() in ("chrome", "browser"):
+                log(f"Opening {target}...", "action")
+                ok, msg = _open_program(target)
+                log(f"  {msg}" if ok else f"  Failed: {msg}", "info" if ok else "error")
+                if "chrome" in target.lower() or "browser" in target.lower():
+                    browser_opened = True
+                actions_done.append(f"opened {target}")
+                time.sleep(1.5)
+            else:
+                # Unknown target — try as program first, then as website
+                log(f"Trying to open {target}...", "action")
+                ok, msg = _open_program(target)
+                if ok:
+                    log(f"  {msg}", "info")
+                    actions_done.append(f"opened {target}")
+                else:
+                    # Try as URL
+                    if not browser_opened:
+                        _open_program("chrome")
+                        browser_opened = True
+                        time.sleep(2.0)
+                    ok2, msg2 = _open_url(target)
+                    log(f"  {msg2}" if ok2 else f"  Failed: {msg2}", "info" if ok2 else "error")
+                    actions_done.append(f"opened {target}")
+                time.sleep(1.0)
+
+        # "play lichess", "go to youtube", "play chess"
+        elif part_stripped.startswith("play ") or part_stripped.startswith("go to ") or part_stripped.startswith("visit "):
+            target = re.sub(r'^(play|go to|visit)\s+', '', part_stripped).strip()
+
+            url = None
+            for name, site in WEBSITE_MAP.items():
+                if name in target:
+                    url = site
+                    break
+            if url is None and any(ind in target for ind in (".com", ".org", ".net", ".io", ".gg", ".tv", ".ai")):
+                url = target
+            if url is None and "chess" in target:
+                url = "lichess.org"
+
+            if url:
+                if not browser_opened:
+                    log(f"Opening Chrome...", "action")
+                    _open_program("chrome")
+                    browser_opened = True
+                    time.sleep(2.0)
+                log(f"Navigating to {url}...", "action")
+                ok, msg = _open_url(url)
+                log(f"  {msg}" if ok else f"  Failed: {msg}", "info" if ok else "error")
+                actions_done.append(f"opened {url}")
+                time.sleep(1.0)
+            else:
+                return False  # Can't handle this part — fall through to router
+
+        # "search for X", "google X"
+        elif part_stripped.startswith("search ") or part_stripped.startswith("google "):
+            query = re.sub(r'^(search\s+for|search|google)\s+', '', part_stripped).strip()
+            if not browser_opened:
+                log(f"Opening Chrome...", "action")
+                _open_program("chrome")
+                browser_opened = True
+                time.sleep(2.0)
+            url = f"google.com/search?q={query.replace(' ', '+')}"
+            log(f"Searching: {query}...", "action")
+            ok, msg = _open_url(url)
+            log(f"  {msg}" if ok else f"  Failed: {msg}", "info" if ok else "error")
+            actions_done.append(f"searched {query}")
+            time.sleep(1.0)
+
+        else:
+            # Unrecognized part — can't handle without router
+            return False
+
+    if actions_done:
+        log(f"Quick commands done: {', '.join(actions_done)}", "info")
+        return True
+
+    return False
+
+
 def run_task(task: str) -> None:
     """Run the full agent flow for one task. Logs JSON lines to stdout. No tkinter."""
     cfg = _load_config()
@@ -204,12 +318,6 @@ def run_task(task: str) -> None:
     }
     chess = ChessEngine(log_fn=log)
     state["chess"] = chess
-    log("Loading chess engine...", "warning")
-    if not chess.load_models():
-        log("Chess engine failed to load.", "error")
-        print(json.dumps({"type": "done", "message": "Chess load error"}), flush=True)
-        return
-    log("Chess engine ready.", "info")
 
     task_stripped = (task or "").strip()
     if task_stripped.startswith("1234") and task_stripped[4:].lstrip().lstrip(",").strip():
@@ -226,96 +334,27 @@ def run_task(task: str) -> None:
         return
 
     task_lower = task_stripped.lower()
-    if (task_lower.startswith("open ") or task_lower.startswith("launch ")) and " and " not in task_lower and "," not in task_stripped:
-        app_name = task_stripped[5:].strip() if task_lower.startswith("open ") else task_stripped[7:].strip()
-        if app_name:
-            log("Opening app directly (Win+R)...", "action")
-            ok, msg = _open_program(app_name)
-            log(f"  {msg}" if ok else f"  Failed: {msg}", "info" if ok else "error")
-            print(json.dumps({"type": "done", "message": msg if ok else "Failed"}), flush=True)
-            return
 
-    log("--- PHASE 1: Router ---", "header")
+    # ── Quick commands that don't need a Gemini call ──
+    handled = _try_quick_commands(task_stripped, task_lower, log)
+    if handled:
+        print(json.dumps({"type": "done", "message": "Done"}), flush=True)
+        return
+
+    if not api_key:
+        log("No Gemini API key. Set it in Settings (click dot → ⚙) or set GEMINI_API_KEY env var.", "error")
+        print(json.dumps({"type": "done", "message": "No API key"}), flush=True)
+        return
+
+    log("--- Starting screen control ---", "header")
     log("Taking screenshot...", "action")
+    _signal_hide()
     time.sleep(0.3)
     screenshot, cursor_xy, screen_size = _take_screenshot_with_cursor()
-    ui_elements = get_ui_elements()
+    _signal_show()
 
-    log("Asking Gemini (router)...", "action")
-    action, payload, raw_response = "comment", "Router did not run.", ""
-    MAX_ROUTER_ATTEMPTS = 5
-    MAX_LOADING_RETRIES = 5
-    loading_retries = 0
-    router_attempt = 0
-
-    while state["running"]:
-        try:
-            action, payload, raw_response = _run_router(state, task_stripped or task, screenshot, ui_elements, cursor_xy, screen_size)
-            if action == "screen_loading":
-                if loading_retries >= MAX_LOADING_RETRIES:
-                    log("Screen still loading after max retries; stopping.", "dim")
-                    break
-                loading_retries += 1
-                log(f"Screen still loading (retry {loading_retries}/{MAX_LOADING_RETRIES}); waiting 2s...", "action")
-                time.sleep(2)
-                screenshot, cursor_xy, screen_size = _take_screenshot_with_cursor()
-                ui_elements = get_ui_elements()
-                router_attempt = 0
-                continue
-            break
-        except Exception as e:
-            router_attempt += 1
-            err_str = str(e)
-            if router_attempt < MAX_ROUTER_ATTEMPTS:
-                wait = [3, 5, 8, 15][min(router_attempt - 1, 3)]
-                log(f"Router attempt {router_attempt}/{MAX_ROUTER_ATTEMPTS} failed; retrying in {wait}s...", "dim")
-                time.sleep(wait)
-                continue
-            log(f"Router error: {err_str}", "error")
-            action, payload, raw_response = "comment", f"Error: {err_str}", ""
-            break
-
-    # On router done
-    if action == "store_feedback":
-        user_message = (task_stripped or "").strip()
-        if user_message.lower().startswith("1234"):
-            user_message = user_message[4:].lstrip().lstrip(",").strip()
-        if not user_message:
-            user_message = "Feedback from screenshot"
-        _save_prompt_entry({
-            "type": "feedback",
-            "user_message": user_message,
-            "feedback": payload if isinstance(payload, dict) else {"raw": str(payload)},
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        })
-        log("Feedback stored.", "info")
-        print(json.dumps({"type": "done", "message": "Done"}), flush=True)
-        return
-
-    if action == "start_chess":
-        playing_as = payload.get("playing_as", "white") if isinstance(payload, dict) else "white"
-        state["turn"] = playing_as
-        log(f"Chess board detected; playing as {playing_as}. Starting chess agent.", "info")
-        _run_chess_loop(state, log)
-        print(json.dumps({"type": "done", "message": "Chess finished"}), flush=True)
-        return
-
-    if action == "execute":
-        act = payload.get("action", "") if isinstance(payload, dict) else ""
-        log(f"Router → execute first action: {act}", "info")
-        log("--- PHASE 2: Screen control loop ---", "header")
-        _run_screen_control_loop(state, task_stripped or task, screenshot, payload, log)
-        print(json.dumps({"type": "done", "message": "Done"}), flush=True)
-        return
-
-    if action == "screen_loading":
-        log("Page still loading; try again in a moment.", "warning")
-        print(json.dumps({"type": "done", "message": "Screen loading"}), flush=True)
-        return
-
-    msg = payload.get("message", payload) if isinstance(payload, dict) else payload
-    log(f"[Gemini] {msg}", "thought")
-    print(json.dumps({"type": "done", "message": str(msg)[:200]}), flush=True)
+    _run_screen_control_loop(state, task_stripped or task, screenshot, None, log)
+    print(json.dumps({"type": "done", "message": "Done"}), flush=True)
 
 
 def _run_screen_control_loop(state, task, initial_screenshot, first_action, log):
@@ -329,6 +368,7 @@ def _run_screen_control_loop(state, task, initial_screenshot, first_action, log)
     _same_click_count = 0
     _last_was_move_to = None
     screen_action_count = 0
+    _consecutive_noaction = 0
 
     while state["running"]:
         if current_action:
@@ -374,9 +414,11 @@ def _run_screen_control_loop(state, task, initial_screenshot, first_action, log)
             break
 
         log("  Taking screenshot...", "action")
+        _signal_hide()
         time.sleep(0.3)
         screenshot, cursor_xy, screen_size = _take_screenshot_with_cursor()
         ui_elements = get_ui_elements()
+        _signal_show()
         sw, sh = screenshot.size[0], screenshot.size[1]
 
         if not state["running"]:
@@ -401,8 +443,10 @@ def _run_screen_control_loop(state, task, initial_screenshot, first_action, log)
                 break
             if action == "screen_loading":
                 time.sleep(2)
+                _signal_hide()
                 screenshot, cursor_xy, screen_size = _take_screenshot_with_cursor()
                 ui_elements = get_ui_elements()
+                _signal_show()
                 continue
             if action == "add_feedback":
                 p = payload if isinstance(payload, dict) else {}
@@ -421,6 +465,7 @@ def _run_screen_control_loop(state, task, initial_screenshot, first_action, log)
 
         if action == "execute":
             current_action = payload
+            _consecutive_noaction = 0
             if prepared_img is not None:
                 act = payload.get("action", "")
                 params = payload.get("parameters", {})
@@ -437,13 +482,30 @@ def _run_screen_control_loop(state, task, initial_screenshot, first_action, log)
             log("Chess board detected; starting chess agent.", "info")
             _run_chess_loop(state, log)
             return
+        elif action == "comment":
+            msg = str(payload)[:200] if payload else ""
+            _consecutive_noaction += 1
+            if _consecutive_noaction >= 5:
+                log(f"  Agent gave up after 5 consecutive non-actions. Last: {msg}", "warning")
+                return
+            log(f"  [Gemini] {msg}", "thought")
+            current_action = None  # No action — loop back and re-screenshot
         else:
-            log(f"  Gemini replied (stopping): {str(payload)[:200]}", "warning")
-            return
+            # Unknown action type — treat as comment and keep looping
+            _consecutive_noaction += 1
+            if _consecutive_noaction >= 5:
+                return
+            current_action = None
 
 
 def _run_chess_loop(state, log):
     chess = state["chess"]
+    if not chess.ready:
+        log("Loading chess engine...", "warning")
+        if not chess.load_models():
+            log("Chess engine failed to load — cannot play chess.", "error")
+            return
+        log("Chess engine ready.", "info")
     chess.reset()
     turn = state["turn"]
     conf = state["conf"]
@@ -456,8 +518,10 @@ def _run_chess_loop(state, log):
 
     while state["running"]:
         log(f"-- Scan #{chess.cycle_count + 1} --", "action")
+        _signal_hide()
         time.sleep(0.2)
         ss = pyautogui.screenshot()
+        _signal_show()
         r = chess.analyze(ss, conf=conf, depth=depth, turn=turn, force_move=False)
 
         if r["status"] == "move":
@@ -477,10 +541,12 @@ def _run_chess_loop(state, log):
                 _last_move_attempted = None
             else:
                 fen_before_move = r["fen"].split(" ")[0]
+                _signal_hide()
                 chess.execute_move(best, r["board_box"], r["orientation"], click_delay=click_delay)
                 log(f"  Move #{chess.move_count} played!", "info")
                 time.sleep(1.2)
                 ss2 = pyautogui.screenshot()
+                _signal_show()
                 chess.capture_post_move_fen(ss2, conf)
                 if chess._last_fen == fen_before_move or chess._last_fen is None:
                     chess._last_fen = None

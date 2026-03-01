@@ -26,19 +26,32 @@ GAME_OVER_KEYWORDS = [
 ]
 
 # ── YOLO class -> python-chess piece mapping ──
+# Supports both underscore ("white_king") and hyphen ("white-king") label styles.
 YOLO_TO_PIECE = {
     "white_king":   chess.Piece(chess.KING,   chess.WHITE),
+    "white-king":   chess.Piece(chess.KING,   chess.WHITE),
     "white_queen":  chess.Piece(chess.QUEEN,  chess.WHITE),
+    "white-queen":  chess.Piece(chess.QUEEN,  chess.WHITE),
     "white_rook":   chess.Piece(chess.ROOK,   chess.WHITE),
+    "white-rook":   chess.Piece(chess.ROOK,   chess.WHITE),
     "white_bishop": chess.Piece(chess.BISHOP, chess.WHITE),
+    "white-bishop": chess.Piece(chess.BISHOP, chess.WHITE),
     "white_knight": chess.Piece(chess.KNIGHT, chess.WHITE),
+    "white-knight": chess.Piece(chess.KNIGHT, chess.WHITE),
     "white_pawn":   chess.Piece(chess.PAWN,   chess.WHITE),
+    "white-pawn":   chess.Piece(chess.PAWN,   chess.WHITE),
     "black_king":   chess.Piece(chess.KING,   chess.BLACK),
+    "black-king":   chess.Piece(chess.KING,   chess.BLACK),
     "black_queen":  chess.Piece(chess.QUEEN,  chess.BLACK),
+    "black-queen":  chess.Piece(chess.QUEEN,  chess.BLACK),
     "black_rook":   chess.Piece(chess.ROOK,   chess.BLACK),
+    "black-rook":   chess.Piece(chess.ROOK,   chess.BLACK),
     "black_bishop": chess.Piece(chess.BISHOP, chess.BLACK),
+    "black-bishop": chess.Piece(chess.BISHOP, chess.BLACK),
     "black_knight": chess.Piece(chess.KNIGHT, chess.BLACK),
+    "black-knight": chess.Piece(chess.KNIGHT, chess.BLACK),
     "black_pawn":   chess.Piece(chess.PAWN,   chess.BLACK),
+    "black-pawn":   chess.Piece(chess.PAWN,   chess.BLACK),
 }
 
 # Keywords that trigger chess mode

@@ -38,6 +38,19 @@ from PIL import Image, ImageDraw, ImageFont, ImageTk
 
 from chess_agent import ChessEngine, is_chess_task
 
+# Set to True when running via --stdin so screenshot helpers signal Electron
+_HEADLESS_STDIN = False
+
+
+def _signal_hide():
+    if _HEADLESS_STDIN:
+        print(json.dumps({"type": "hide_windows"}), flush=True)
+
+
+def _signal_show():
+    if _HEADLESS_STDIN:
+        print(json.dumps({"type": "show_windows"}), flush=True)
+
 
 def _move_cursor(x: int, y: int) -> bool:
     """Move the mouse cursor to (x, y). Use Windows SetCursorPos when available."""
@@ -678,9 +691,12 @@ def _take_screenshot_with_cursor():
 
     Returns (screenshot: PIL.Image, cursor_xy: tuple[int,int], screen_size: tuple[int,int]).
     """
+    _signal_hide()
+    time.sleep(0.3)   # wait for Electron overlay windows to actually hide
     cursor = pyautogui.position()
     screenshot = pyautogui.screenshot()
     screen_size = pyautogui.size()
+    _signal_show()
     return screenshot, (cursor.x, cursor.y), (screen_size[0], screen_size[1])
 
 
@@ -2058,14 +2074,17 @@ NEVER click blindly. If CLICK_XY missed the target (check next screenshot), try 
         self._show_event.set()
 
     def _hide_for_screenshot(self):
+        _signal_hide()          # tell Electron to hide its overlay windows too
         self._hide_event.clear()
         self.root.after(0, self._hide_and_signal)
         self._hide_event.wait(timeout=2.0)
+        time.sleep(0.15)        # extra buffer for Electron windows to finish hiding
 
     def _show_after_screenshot(self):
         self._show_event.clear()
         self.root.after(0, self._show_and_signal)
         self._show_event.wait(timeout=2.0)
+        _signal_show()          # tell Electron to show its overlay windows again
 
     def _minimize_for_execution(self):
         """Minimize window (alternative to full hide). Screen control now uses _hide_for_screenshot so GUI is fully closed during actions."""
@@ -2145,6 +2164,8 @@ def run_stdin_loop():
     """Run gui.py headless: read one task per line from stdin, run it (same flow as GUI), log JSON to stdout.
     Used when Electron (or a terminal) sends tasks to this process. Process stays running for multiple tasks.
     """
+    global _HEADLESS_STDIN
+    _HEADLESS_STDIN = True
     root = tk.Tk()
     root.withdraw()
     app = AgentGUI(root)
