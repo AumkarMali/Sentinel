@@ -200,47 +200,27 @@ def _parse_json(text: str):
 
 
 # Router system prompt (tail) — used by both GUI and process worker
-ROUTER_SYSTEM_TAIL = """Prequisite knowledge:
+ROUTER_SYSTEM_TAIL = """You control the screen. Reply with <thinking>brief reason</thinking> then ONE JSON object.
 
- CRITICAL - How to determine playing_as: The human player's pieces are ALWAYS at the BOTTOM of the board (closer to bottom of screen). Look ONLY at the bottom two rows—which color of pieces are there?
-  - DARK/GREY/BROWN pieces at the bottom → playing_as: "black"
-  - LIGHT/WHITE/CREAM pieces at the bottom → playing_as: "white"
-  IGNORE which piece moved. Do NOT infer from "a white piece moved" that the user plays white. Look at the bottom two rows only. Also look for UI text like "You play as Black", "Playing Black", "Black to move" near the bottom—that confirms black.
+CLICKING: Use CLICK_XY to click any point on screen. Read the grid overlay to get exact (x,y) coordinates of the target center, then: {"action": "CLICK_XY", "parameters": {"x": 530, "y": 270}}
+This moves the cursor and clicks in one step. Use the grid lines (labeled every 50px) to read coordinates precisely — do NOT guess.
 
-Respond with exactly one JSON object, no markdown, no extra text:
+Chess: pieces at BOTTOM = user's color. Light at bottom → "white", dark → "black".
+- Board visible: {"action": "start_chess", "parameters": {"reason": "...", "playing_as": "white"}}
+- No board: {"action": "comment", "message": "No chess board visible."}
 
-- Chess task + board visible: {"action": "start_chess", "reason": "...", "playing_as": "white" or "black"}
-- Chess task, NO board: {"action": "comment", "message": "No chess board visible."}
-- If user says "you're on chess.com, play a game" (or "we're on chess.com, start a game"): they mean click to start a PvP game on the site. Return ONE execute action (e.g. CLICK or MOVE_TO) to click "Play", "Quick pair", "Create game", or similar. Use start_chess only when a board is already visible and they want the bot to play moves.
-- Task requires CONTROLLING the screen: you MUST return ONE execute action. Use the UI elements list to click by name. One message = one command.
-  * For "open X and then open Y" (e.g. open Chrome and then open YouTube): do the FIRST part only this turn. Return OPEN_APP with the app (e.g. Chrome). Next turn we will ask you again and you do OPEN_URL with the site (e.g. youtube.com).
-  * OPEN_APP — ONLY for launching Windows executable programs (Chrome, Edge, Notepad, Spotify, Discord, etc.). Uses Win+R internally. NEVER use OPEN_APP for websites (chess.com, lichess.org, youtube.com) or game modes — those are not executables. Examples: {"action": "OPEN_APP", "parameters": {"program": "Chrome"}} or {"program": "Edge"} or {"program": "Notepad"}
-  * OPEN_URL — For navigating to any website when a browser is already open. Uses the address bar. Examples: {"action": "OPEN_URL", "parameters": {"url": "lichess.org"}} or {"url": "chess.com"} or {"url": "https://youtube.com"}
-  * For "play lichess" or "play chess.com" → first OPEN_APP "Chrome" (if browser not open), then OPEN_URL "lichess.org". Then use MOVE_TO + CLICK_CURRENT to click buttons on the page.
-  * MOVE_TO (move cursor only; next turn you will see the cursor there, then use CLICK_CURRENT to click): {"action": "MOVE_TO", "parameters": {"x": 400, "y": 300}}
-  * CLICK_CURRENT (only use when the crosshair is centered ON the button, not just close): {"action": "CLICK_CURRENT", "parameters": {}}
-  * CLICK (by element name from list): {"action": "CLICK", "parameters": {"element": "Open"}}
-  * DOUBLE_CLICK: {"action": "DOUBLE_CLICK", "parameters": {"element": "Google Chrome"}}
-  * TYPE_IN: {"action": "TYPE_IN", "parameters": {"element": "Search", "text": "chess.com"}}
-  * MENU: {"action": "MENU", "parameters": {"path": "File->Open"}}
-  * KEYS: {"action": "KEYS", "parameters": {"keys": ["ctrl", "t"]}}
-  * TYPE_TEXT: {"action": "TYPE_TEXT", "parameters": {"text": "hello"}}
-  * {"action": "TASK_COMPLETE", "parameters": {"message": "Done"}}
-- Observational only (user asks "what's on screen?" or "describe this", no action wanted): {"action": "comment", "message": "your observation"}
+Actions (one per turn):
+- CLICK_XY: move+click at (x,y) from grid: {"action": "CLICK_XY", "parameters": {"x": 400, "y": 300}}
+- CLICK by element name: {"action": "CLICK", "parameters": {"element": "Open"}}
+- OPEN_APP (Windows programs ONLY — Chrome, Edge, Notepad, NOT websites): {"action": "OPEN_APP", "parameters": {"program": "Chrome"}}
+- OPEN_URL (websites, browser must be open): {"action": "OPEN_URL", "parameters": {"url": "chess.com"}}
+- KEYS: {"action": "KEYS", "parameters": {"keys": ["ctrl", "t"]}}
+- TYPE_TEXT: {"action": "TYPE_TEXT", "parameters": {"text": "hello"}}
+- TYPE_IN: {"action": "TYPE_IN", "parameters": {"element": "Search", "text": "query"}}
+- TASK_COMPLETE: {"action": "TASK_COMPLETE", "parameters": {"message": "Done"}}
+- Observation only: {"action": "comment", "message": "..."}
 
-CRITICAL — NEVER open apps with KEYS: Do NOT use KEYS ["win"], KEYS ["win", "r"], or any key combination to open programs. OPEN_APP is the ONLY correct action for launching applications. KEYS is only for shortcuts like Ctrl+C, Enter, Tab, F5, etc.
-
-CRITICAL — OPEN_APP is for Windows PROGRAMS only (Chrome, Edge, Notepad, Spotify). It physically cannot open websites. For anything that is a website/URL use OPEN_URL. For clicking buttons on a webpage use MOVE_TO then CLICK_CURRENT. Do NOT use OPEN_APP to "start a game" or "play chess" or "open lichess" — those require browser navigation (OPEN_URL) or mouse clicks (MOVE_TO + CLICK_CURRENT).
-
-CRITICAL - Response format: Your reply MUST start with <thinking>...</thinking> (your reasoning), then on the next line exactly one JSON object. Never reply with only JSON.
-Step 1 - In <thinking> say: (1) What you see in the screenshot (2) What the user wants (3) Which action you will take and why.
-Step 2 - On the next line: exactly one JSON object.
-Example for opening an app (use OPEN_APP — do NOT use KEYS ["win"] or KEYS ["win", "r"]):
-<thinking>
-User wants to open Edge. I will use OPEN_APP. I must NOT use KEYS ["win", "r"] or KEYS ["win"] to open apps.
-</thinking>
-{"action": "OPEN_APP", "parameters": {"program": "Edge"}}
-The screenshot has a RED cursor marker. You may do ONLY ONE action per turn: either MOVE_TO (x,y) to move the cursor, or CLICK_CURRENT to click where the cursor already is. Never move and click in one step—always MOVE_TO first, then next turn CLICK_CURRENT only when the crosshair is centered ON the button (close is not enough)."""
+NEVER use KEYS to open apps (no Win, Win+R). Use OPEN_APP for programs, OPEN_URL for websites."""
 
 
 def _parse_router_response(data, text: str, raw_response: str):
@@ -253,7 +233,7 @@ def _parse_router_response(data, text: str, raw_response: str):
     a_norm = str(raw_action).upper().strip().replace(" ", "_").replace("-", "_")
     if a_norm == "SCREEN_LOADING":
         return ("screen_loading", None)
-    if a_norm in ("CLICK", "CLICK_CURRENT", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "MENU", "KEYS", "KEY_PRESS", "TYPE_TEXT", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL"):
+    if a_norm in ("CLICK", "CLICK_CURRENT", "CLICK_XY", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "MENU", "KEYS", "KEY_PRESS", "TYPE_TEXT", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL"):
         params = data.get("parameters", data)
         act = "KEYS" if a_norm == "KEY_PRESS" else a_norm
         return ("execute", {"action": act, "parameters": params if isinstance(params, dict) else {}})
@@ -266,7 +246,7 @@ def _parse_router_response(data, text: str, raw_response: str):
                 if ia == "store_feedback":
                     fb = inner.get("feedback", {})
                     return ("store_feedback", fb if isinstance(fb, dict) else {"raw": str(fb)})
-                if ia.upper().replace(" ", "_") in ("CLICK", "CLICK_CURRENT", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "MENU", "KEYS", "KEY_PRESS", "TYPE_TEXT", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL"):
+                if ia.upper().replace(" ", "_") in ("CLICK", "CLICK_CURRENT", "CLICK_XY", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "MENU", "KEYS", "KEY_PRESS", "TYPE_TEXT", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL"):
                     params = inner.get("parameters", inner)
                     return ("execute", {"action": ia.upper().replace(" ", "_"), "parameters": params if isinstance(params, dict) else {}})
     if action == "storefeedback":
@@ -288,14 +268,14 @@ def _parse_router_response(data, text: str, raw_response: str):
         if not isinstance(feedback, dict):
             feedback = {"raw": str(feedback)}
         return ("store_feedback", feedback)
-    if action in ("click", "double_click", "type_in", "menu", "keys", "type_text", "task_complete", "open_app", "open_url"):
+    if action in ("click", "click_xy", "double_click", "type_in", "menu", "keys", "type_text", "task_complete", "open_app", "open_url"):
         params = data.get("parameters", data)
         act = "KEYS" if action == "keys" else action.upper().replace(" ", "_")
         return ("execute", {"action": act, "parameters": params if isinstance(params, dict) else {}})
     params = data.get("parameters")
     if isinstance(params, dict) or "parameters" in data:
         a_upper = str(raw_action).upper().replace(" ", "_").replace("-", "_")
-        if a_upper in ("CLICK", "CLICK_CURRENT", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "MENU", "KEYS", "KEY_PRESS", "TYPE_TEXT", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL"):
+        if a_upper in ("CLICK", "CLICK_CURRENT", "CLICK_XY", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "MENU", "KEYS", "KEY_PRESS", "TYPE_TEXT", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL"):
             act = "KEYS" if a_upper == "KEY_PRESS" else a_upper
             return ("execute", {"action": act, "parameters": params if isinstance(params, dict) else {}})
     for start in [i for i, c in enumerate(text) if c == "{"]:
@@ -315,7 +295,7 @@ def _parse_router_response(data, text: str, raw_response: str):
         except json.JSONDecodeError:
             continue
         a = (obj.get("action") or "").upper().replace(" ", "_").replace("-", "_")
-        if a in ("CLICK", "CLICK_CURRENT", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "MENU", "KEYS", "KEY_PRESS", "TYPE_TEXT", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL"):
+        if a in ("CLICK", "CLICK_CURRENT", "CLICK_XY", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "MENU", "KEYS", "KEY_PRESS", "TYPE_TEXT", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL"):
             p = obj.get("parameters", obj)
             act = "KEYS" if a == "KEY_PRESS" else a
             return ("execute", {"action": act, "parameters": p if isinstance(p, dict) else {}})
@@ -539,26 +519,28 @@ def _execute_action(action_dict: dict, screen_w: int, screen_h: int) -> tuple:
                     return _open_app_via_start(el)
             return False, msg
 
-        if action == "MOVE_TO":
+        if action in ("MOVE_TO", "CLICK_XY"):
             x = params.get("x")
             y = params.get("y")
             if x is None or y is None:
-                return False, "MOVE_TO requires 'x' and 'y' parameters"
+                return False, f"{action} requires 'x' and 'y' parameters"
             try:
                 x, y = int(x), int(y)
             except (TypeError, ValueError):
-                return False, "MOVE_TO x,y must be numbers"
-            # screen_w/h = screenshot dimensions that were used to build the model image.
-            # Model image scale: scale = 1024 / max(screen_w, screen_h). So model_w = screen_w * scale.
-            # Convert model coords -> screen pixels: actual = model_coord * screen / model_size = model_coord / scale.
+                return False, f"{action} x,y must be numbers"
             scale = 1024 / max(screen_w, screen_h) if max(screen_w, screen_h) > 1024 else 1.0
             model_w = max(1, int(screen_w * scale))
             model_h = max(1, int(screen_h * scale))
             actual_x = max(0, min(screen_w - 1, int(round(x * screen_w / model_w))))
             actual_y = max(0, min(screen_h - 1, int(round(y * screen_h / model_h))))
-            print(f"[MOVE] model({x},{y}) -> screen({actual_x},{actual_y}) size={screen_w}x{screen_h}", flush=True)
-            ok = _move_cursor(actual_x, actual_y)
-            return ok, f"Moved cursor to ({actual_x}, {actual_y})"
+            print(f"[{action}] model({x},{y}) -> screen({actual_x},{actual_y}) size={screen_w}x{screen_h}", flush=True)
+            _move_cursor(actual_x, actual_y)
+            if action == "CLICK_XY":
+                import time as _t
+                _t.sleep(0.05)
+                pyautogui.click()
+                return True, f"Moved to ({actual_x}, {actual_y}) and clicked"
+            return True, f"Moved cursor to ({actual_x}, {actual_y})"
 
         if action == "CLICK_CURRENT":
             pos = pyautogui.position()
@@ -634,60 +616,59 @@ BG_DARK = "#0f0f1a"
 FG      = "#ffffff"
 ACCENT  = "#e94560"
 
-def _draw_grid_on_image(img, spacing: int = 100):
+def _draw_grid_on_image(img, spacing: int = 50):
     """Overlay a labeled coordinate grid every `spacing` pixels so the model can read off exact coordinates."""
     try:
         draw = ImageDraw.Draw(img)
         w, h = img.size
-        minor_col = (70, 70, 70)    # subtle dark lines every 100px
-        major_col = (110, 110, 110) # slightly brighter every 200px
-        label_col = (160, 200, 255) # light-blue labels
+        minor_col = (50, 50, 50)     # faint lines every 50px
+        major_col = (100, 100, 100)  # brighter every 100px
+        label_col = (180, 220, 255)  # bright blue labels
         try:
-            font = ImageFont.truetype("arial.ttf", 9)
+            font = ImageFont.truetype("arial.ttf", 11)
         except Exception:
             font = ImageFont.load_default()
 
         for x in range(0, w, spacing):
-            col = major_col if x % (spacing * 2) == 0 else minor_col
+            is_major = x % 100 == 0
+            col = major_col if is_major else minor_col
             draw.line([(x, 0), (x, h)], fill=col, width=1)
-            if x > 0:
-                draw.text((x + 2, 2), str(x), fill=label_col, font=font)
+            if is_major and x > 0:
+                draw.text((x + 2, 1), str(x), fill=label_col, font=font)
 
         for y in range(0, h, spacing):
-            col = major_col if y % (spacing * 2) == 0 else minor_col
+            is_major = y % 100 == 0
+            col = major_col if is_major else minor_col
             draw.line([(0, y), (w, y)], fill=col, width=1)
-            if y > 0:
-                draw.text((2, y + 2), str(y), fill=label_col, font=font)
+            if is_major and y > 0:
+                draw.text((2, y + 1), str(y), fill=label_col, font=font)
     except Exception:
         pass
 
 
 def _draw_cursor_on_image(img, cursor_x_img: int, cursor_y_img: int):
-    """Draw a small cursor marker so the model judges CLICK by the exact point, not a big blob."""
+    """Draw a visible cursor marker so the model can see cursor position clearly."""
     try:
         mw, mh = img.size
         cx = max(0, min(mw - 1, cursor_x_img))
         cy = max(0, min(mh - 1, cursor_y_img))
         draw = ImageDraw.Draw(img)
-        # Small crosshair: the CLICK happens at (cx,cy). Only if that point is on the button → CLICK_CURRENT.
-        r, arm, dot, lw = 2, 5, 1, 1
+        r, arm, dot, lw = 4, 12, 2, 2
         draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline="#ff0000", width=lw)
         draw.line([cx - arm, cy, cx + arm, cy], fill="#ff0000", width=lw)
         draw.line([cx, cy - arm, cx, cy + arm], fill="#ff0000", width=lw)
         draw.ellipse([cx - dot, cy - dot, cx + dot, cy + dot], fill="#ff0000", outline="#ffffff")
-        # Coordinate label next to the cursor so the model knows the exact current position
         try:
-            font = ImageFont.truetype("arial.ttf", 11)
+            font = ImageFont.truetype("arial.ttf", 13)
         except Exception:
             font = ImageFont.load_default()
         label = f"CURSOR ({cx},{cy})"
-        tx = cx + arm + 4
-        ty = cy - 10
-        if tx + 80 > mw:
-            tx = cx - arm - 85
+        tx = cx + arm + 6
+        ty = cy - 12
+        if tx + 100 > mw:
+            tx = cx - arm - 110
         if ty < 0:
-            ty = cy + arm + 2
-        # Outline for readability
+            ty = cy + arm + 4
         for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
             draw.text((tx + dx, ty + dy), label, fill="#000000", font=font)
         draw.text((tx, ty), label, fill="#ffff00", font=font)
@@ -1030,25 +1011,18 @@ class AgentGUI:
         user_text += f"\n\nScreenshot dimensions: width={model_w} height={model_h}. Coords from 0 to {model_w-1}, 0 to {model_h-1}."
         user_text += f"\n\n>>> CURRENT CURSOR POSITION: ({cur_mx}, {cur_my}) — the CLICK happens at this point only. Only CLICK_CURRENT if this exact point is on the button. <<<"
         user_text += (
-            "\n\n━━ GRID NAVIGATION (MANDATORY) ━━"
-            "\nThe screenshot has grid lines every 100 px labeled along the top (x) and left (y) edges."
-            f"\nThe grid runs 0→{model_w-1} horizontally and 0→{model_h-1} vertically."
-            "\nBEFORE any MOVE_TO: look at the grid lines nearest to your target, interpolate the exact pixel"
-            " coordinates, and state them in <thinking>. Example: 'target is ~40 px right of the 600-line and"
-            " ~70 px below the 200-line → x=640, y=270 → MOVE_TO {x:640, y:270}'."
-            "\nOne well-aimed MOVE_TO (grid-derived) reaches ANY target in a single step."
-            "\nNext turn: CLICK_CURRENT only if the crosshair is centered ON the button, not just close. If cursor is near but not on center → MOVE_TO again."
+            "\n\nGrid lines every 50px. Use CLICK_XY with grid-derived coordinates to click targets in one step."
         )
         if ui_elements:
-            user_text += "\n\nClickable UI elements (use 'element' name when available):\n"
-            for item in ui_elements[:60]:
+            user_text += "\n\nUI elements (use CLICK with element name when available):\n"
+            for item in ui_elements[:40]:
                 name = (item.get("name") or "").strip()
                 ctype = item.get("control_type", "")
                 if name:
                     user_text += f"  \"{name}\" ({ctype})\n"
         from gemini_vl import call_gemini
         raw_response = call_gemini(
-            system, user_text, img, conversation_messages=None, max_tokens=4096,
+            system, user_text, img, conversation_messages=None, max_tokens=1024,
             api_key=self.gemini_api_key_var.get().strip(),
             model=self.gemini_model_var.get().strip() or None,
         )
@@ -1083,114 +1057,51 @@ class AgentGUI:
         history_str = "\n".join(f"  {i+1}. {a}" for i, a in enumerate(action_history[-12:]))
         learning = _build_learning_context()
 
-        system = "You control the user's computer. You have the full conversation history above: the user's task and every action you've already taken. Use it to remember the goal and what you've done."
-        system += " Use the UI elements list to click by name. Output one action per message."
-        # MOVE_TO commitment override — prepended as top-level rule so it supersedes all others
+        system = "You control the user's computer. Output one action per turn. Be fast and precise."
         if move_to_hint:
-            system = f"OVERRIDE RULE (highest priority):\n{move_to_hint}\n\n" + system
+            system = f"OVERRIDE: {move_to_hint}\n\n" + system
         if thought_history:
-            system += "\n\nYour previous thinking (use this to stay consistent and build on your reasoning):\n"
-            for i, prev in enumerate(thought_history[-3:]):
-                snippet = prev[:800] + "..." if len(prev) > 800 else prev
-                ago = len(thought_history[-3:]) - i
-                system += f"\n[Your thinking from {ago} turn(s) ago]\n{snippet}\n"
+            system += "\nPrevious reasoning:\n"
+            for prev in thought_history[-2:]:
+                system += f"  {prev[:400]}\n"
         if learning:
             system += "\n" + learning
         system += """
 
-CRITICAL - Your reply MUST start with <thinking>...</thinking> then one JSON line. Never reply with only JSON.
-PHASE 1 - <thinking>: (1) What you see (2) What you already did (3) What you will do next and why — including the EXACT grid coordinates of your target.
-PHASE 2 - Next line: exactly one JSON object. No other text.
+Reply: <thinking>short reason + grid coordinates if clicking</thinking> then ONE JSON object.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-COORDINATE GRID — MANDATORY USAGE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-The screenshot has a coordinate grid overlay: faint lines every 100 px, labeled 0, 100, 200, 300 … along the top edge (x-axis) and left edge (y-axis).
-The RED marker is a small crosshair. The actual CLICK happens at its CENTER point only (the tiny dot at CURSOR (x,y)). Only use CLICK_CURRENT if that center point is on the button — ignore the short red lines; if the center is off the button, use MOVE_TO.
-
-HOW TO READ COORDINATES FROM THE GRID:
-• Find the nearest vertical grid line to the LEFT of your target → that is the base x (e.g. 600).
-• Count pixels from that line to the target center → add to base (e.g. target is ~40 px right of the 600 line → x = 640).
-• Do the same vertically: nearest horizontal line ABOVE target → base y, count down → y = base + offset.
-• Example: target sits between the 300 and 400 vertical lines, closer to 350 → x ≈ 350. It sits between 200 and 300 horizontal lines, about 70 px below 200 → y ≈ 270. Use MOVE_TO {"x": 350, "y": 270}.
-• You MUST state these grid-derived coordinates explicitly in your <thinking> block BEFORE choosing the action.
-
-TO CLICK A SPECIFIC BUTTON (e.g. "Play against computer" on Lichess):
-1. Find the button in the image — use its label and position (e.g. on Lichess lobby it is the grey button in the RIGHT column, NOT the thumbnails/cards at the bottom).
-2. Read the grid: which vertical line is left of the button? Which horizontal line is above it? Estimate the button center from those lines (e.g. between 800 and 1000 on x → center x ≈ 900; between 380 and 420 on y → center y ≈ 400). Use the actual grid numbers you see in the image.
-3. Output ONLY: {"action": "MOVE_TO", "parameters": {"x": <your_x>, "y": <your_y>}} with the coordinates you read. Do not click elsewhere. Do not describe — just output the JSON.
-4. Next turn: if CURSOR (x,y) matches that point, output {"action": "CLICK_CURRENT", "parameters": {}}.
-
-CLICKING RULES — follow these exactly:
-1. ALWAYS derive target coordinates from the grid labels before issuing MOVE_TO — do not guess.
-2. Issue MOVE_TO {"x": <grid-x>, "y": <grid-y>} to position the cursor on the target.
-3. CLOSE IS NOT ENOUGH. Only use CLICK_CURRENT when the red crosshair is directly ON the button center — the crosshair must be visibly centered on the clickable element, not beside it or just touching its edge. If the cursor is "close" or "near" the button but not clearly centered on it → use MOVE_TO again to the exact center. When in doubt, MOVE_TO; never guess.
-4. On the NEXT turn: read "CURSOR (x,y)" and compare to the target's center. If they match (or crosshair is clearly centered on the button) → CLICK_CURRENT. If there is ANY gap or the crosshair is only near the button → do another MOVE_TO.
-5. NEVER use CLICK_CURRENT unless the crosshair is centered on the target. A 1-pixel gap = MOVE_TO first. "Near" or "close" = MOVE_TO.
-6. You can reach any target in ONE accurate MOVE_TO by reading the grid carefully. Never take multiple tiny steps.
-7. COMMITMENT RULE: Once you issue MOVE_TO, your ONLY valid next actions are CLICK_CURRENT (cursor centered on target) or MOVE_TO again (cursor missed or only close). Do NOT switch to KEYS, TYPE_TEXT, OPEN_URL, or any other action until you have finished the click. Stay focused on completing the click sequence.
-
-Use SCREEN_LOADING when the page/tab is still loading (spinner, blank, or incomplete). We will take a fresh screenshot and ask you again. Use ADD_FEEDBACK when you finally succeeded but it took too long or too many steps—save a short lesson so you can do it faster next time.
-
-YouTube search: To search on YouTube, first press "/" to focus the search bar (use KEYS with key "/"), then TYPE_TEXT the search query, then KEYS Enter. Then MOVE_TO the first video thumbnail and next turn CLICK_CURRENT to play it. Example: {"action": "KEYS", "parameters": {"keys": ["/"]}} then {"action": "TYPE_TEXT", "parameters": {"text": "Mr Beast video"}} then {"action": "KEYS", "parameters": {"keys": ["enter"]}} then MOVE_TO the first result, then CLICK_CURRENT.
-
-Chess.com (and similar sites): When the user says "play a game" or "start a game" and they are on chess.com (or say "you're on chess.com"), they mean start a PvP (player vs player) game by default. Only if they say "vs computer", "against the computer", "vs bot", or "play vs AI" do they mean a computer game. To start a PvP game: use CLICK (or MOVE_TO then next turn CLICK_CURRENT) on the button that starts a game vs a human — e.g. "Play", "Quick pair", "Create game", "New game", "Play with someone", "Quick game". Use the clickable UI elements list to find the exact button name. To start a vs-computer game instead: click "Play vs Computer", "Computer", "vs Bot", or similar. One action per turn.
-LICHESS: On the Lichess lobby, "Play against computer" is the grey button in the RIGHT column of the page (with "Create lobby game" and "Challenge a friend" above/below it). It is NOT the thumbnails or cards at the bottom. Use the grid to read that button's center (right side of the image, upper half) and issue MOVE_TO with those coordinates, then next turn CLICK_CURRENT.
-
-When a chess BOARD is visible (pieces on the board, game in progress or just started): return start_chess so the chess agent (YOLO + Stockfish) takes over to play moves. Do NOT keep clicking — return {"action": "start_chess", "parameters": {"reason": "Board visible", "playing_as": "white" or "black"}}. playing_as = color of the pieces at the BOTTOM of the board (user's pieces): light at bottom → "white", dark at bottom → "black".
+COORDINATE GRID: The screenshot has grid lines every 50px labeled along top (x) and left (y).
+To click a target: find the grid lines nearest to it, interpolate the center pixel, use CLICK_XY.
+Example: button center is between x=500 and x=550, near y=275 → {"action": "CLICK_XY", "parameters": {"x": 525, "y": 275}}
 
 Actions:
-- For "open Chrome and then open YouTube": first turn return OPEN_APP with program "Chrome". Next turn (after Chrome is open) return OPEN_URL with url "youtube.com".
-- OPEN_APP — ONLY for Windows executable programs (Chrome, Edge, Notepad, Spotify, Discord, etc.). Uses Win+R. NEVER for websites or URLs. Examples: {"action": "OPEN_APP", "parameters": {"program": "Chrome"}} or {"program": "Notepad"}
-- OPEN_URL — Navigate to any website when a browser is open. Examples: {"action": "OPEN_URL", "parameters": {"url": "lichess.org"}} or {"url": "chess.com"}
-- MOVE_TO (move cursor only): {"action": "MOVE_TO", "parameters": {"x": 400, "y": 300}}
-- CLICK_CURRENT (only when crosshair is centered ON the target—close/near is not enough): {"action": "CLICK_CURRENT", "parameters": {}}
-- CLICK: {"action": "CLICK", "parameters": {"element": "Open"}}
-- DOUBLE_CLICK: {"action": "DOUBLE_CLICK", "parameters": {"element": "Google Chrome"}}
-- TYPE_IN: {"action": "TYPE_IN", "parameters": {"element": "Search", "text": "chess.com"}}
-- MENU: {"action": "MENU", "parameters": {"path": "File->Open"}}
+- CLICK_XY (move cursor to x,y AND click — use grid to get exact coordinates): {"action": "CLICK_XY", "parameters": {"x": 400, "y": 300}}
+- CLICK by element name: {"action": "CLICK", "parameters": {"element": "Open"}}
+- OPEN_APP (Windows programs ONLY, NOT websites): {"action": "OPEN_APP", "parameters": {"program": "Chrome"}}
+- OPEN_URL (websites, browser must be open): {"action": "OPEN_URL", "parameters": {"url": "chess.com"}}
 - KEYS: {"action": "KEYS", "parameters": {"keys": ["ctrl", "t"]}}
-- TYPE_TEXT: {"action": "TYPE_TEXT", "parameters": {"text": "hello world"}}
+- TYPE_TEXT: {"action": "TYPE_TEXT", "parameters": {"text": "hello"}}
+- TYPE_IN: {"action": "TYPE_IN", "parameters": {"element": "Search", "text": "query"}}
 - TASK_COMPLETE: {"action": "TASK_COMPLETE", "parameters": {"message": "Done"}}
-- SCREEN_LOADING (page/tab still loading—request a fresh screenshot): {"action": "SCREEN_LOADING", "parameters": {}}
-- start_chess (chess board visible — hand off to chess agent to play moves): {"action": "start_chess", "parameters": {"reason": "Board visible", "playing_as": "white" or "black"}}. Use when you see a board with pieces; playing_as = pieces at bottom of board.
-- ADD_FEEDBACK (save a lesson for next time, e.g. after something took too long): {"action": "ADD_FEEDBACK", "parameters": {"message": "What happened", "what_was_wrong": "What was slow or wrong", "correct_approach": "How to do it faster next time"}}
+- SCREEN_LOADING: {"action": "SCREEN_LOADING", "parameters": {}}
+- start_chess (board visible, pieces at bottom = user's color): {"action": "start_chess", "parameters": {"reason": "Board visible", "playing_as": "white"}}
+- MOVE_TO (move only, no click): {"action": "MOVE_TO", "parameters": {"x": 400, "y": 300}}
+- CLICK_CURRENT (click where cursor is): {"action": "CLICK_CURRENT", "parameters": {}}
 
-CRITICAL — NEVER open apps with KEYS: Do NOT use KEYS ["win"], KEYS ["win", "r"], or any key combination to launch programs. KEYS is only for shortcuts like Ctrl+C, Enter, Tab.
-
-CRITICAL — OPEN_APP is for Windows PROGRAMS only (Chrome, Edge, Notepad, Spotify). NEVER use OPEN_APP for websites, URLs, or tasks inside a browser. To navigate to a site: use OPEN_URL. To click something on a webpage: use MOVE_TO then CLICK_CURRENT. For "start a chess game", "play lichess", "click Play button" → use MOVE_TO + CLICK_CURRENT, NOT OPEN_APP.
-
-Example for opening an app (use OPEN_APP; the system handles launching it):
-<thinking>
-User wants to open Edge. I will use OPEN_APP — the system handles opening it. I must NOT use KEYS ["win", "r"] or KEYS ["win"].
-</thinking>
-{"action": "OPEN_APP", "parameters": {"program": "Edge"}}"""
+PREFER CLICK_XY over MOVE_TO+CLICK_CURRENT. CLICK_XY moves and clicks in ONE step.
+NEVER use KEYS to open apps. OPEN_APP is for programs only; OPEN_URL for websites."""
 
         model_w, model_h = img.size
-        user_text = f"Task: {task}\n\nActions so far:\n{history_str or '  (none yet)'}\n\nWhat's the next action? Look at the screenshot."
-        user_text += f"\n\nScreenshot dimensions: width={model_w} height={model_h}. Coords 0 to {model_w-1}, 0 to {model_h-1}."
-        user_text += f"\n\n>>> CURRENT CURSOR POSITION: ({cur_mx}, {cur_my}) — the CLICK happens at this point only. Only CLICK_CURRENT if this exact point is on the button. <<<"
-        user_text += (
-            "\n\n━━ GRID NAVIGATION (MANDATORY) ━━"
-            "\nThe screenshot has grid lines every 100 px labeled along the top (x) and left (y) edges."
-            f"\nThe grid runs 0→{model_w-1} horizontally and 0→{model_h-1} vertically."
-            "\nBEFORE every MOVE_TO: find the grid lines nearest your target, interpolate the pixel offset,"
-            " and write the exact coordinates in <thinking>. Example: 'button center is ~30 px right of the"
-            " 500-line and ~50 px below the 300-line → x=530, y=350 → MOVE_TO {x:530, y:350}'."
-            "\nOne accurate grid-derived MOVE_TO reaches any target in a SINGLE step — no tiny incremental steps."
-            "\nCLICK_CURRENT rule: ONLY when the crosshair is centered ON the button (not just close or near)."
-            " If the cursor is beside the button or only touching its edge → MOVE_TO to the button center. When in doubt, MOVE_TO."
-        )
-        task_lower = (task or "").lower()
-        if "lichess" in task_lower or "play against computer" in task_lower or ("computer" in task_lower and "play" in task_lower):
-            user_text += "\n\nIf the target is 'Play against computer' on Lichess: that button is in the RIGHT column of the lobby. Read its center from the grid (right side of image, upper half) and MOVE_TO that point. Do NOT move to the thumbnails/cards at the bottom."
+        user_text = f"Task: {task}\n\nActions so far:\n{history_str or '  (none yet)'}\n\nNext action?"
+        user_text += f"\nImage: {model_w}x{model_h}. Cursor at ({cur_mx},{cur_my}). Grid every 50px."
+        user_text += "\nUse CLICK_XY with grid-derived coordinates to click targets in one step."
         if move_to_hint:
-            user_text += f"\n\n{'━'*60}\n{move_to_hint}\n{'━'*60}"
+            user_text += f"\n{move_to_hint}"
         if stuck_hint:
-            user_text += f"\n\n{'='*60}\n{stuck_hint}\n{'='*60}"
+            user_text += f"\n{stuck_hint}"
         if ui_elements:
-            user_text += "\n\nClickable UI elements (use 'element' name in CLICK/DOUBLE_CLICK/TYPE_IN when available):\n"
-            for item in ui_elements[:60]:
+            user_text += "\n\nUI elements:\n"
+            for item in ui_elements[:40]:
                 name = (item.get("name") or "").strip()
                 ctype = item.get("control_type", "")
                 if name:
@@ -1217,7 +1128,7 @@ User wants to open Edge. I will use OPEN_APP — the system handles opening it. 
                     text = call_gemini(
                         system, user_text, img,
                         conversation_messages=None if prior_parts else local_history,
-                        max_tokens=4096,
+                        max_tokens=1024,
                         api_key=self.gemini_api_key_var.get().strip(),
                         model=self.gemini_model_var.get().strip() or None,
                         prior_screenshot_parts=prior_parts,
@@ -1238,8 +1149,8 @@ User wants to open Edge. I will use OPEN_APP — the system handles opening it. 
                         raise
             messages.append({"role": "user", "content": user_text})
             messages.append({"role": "assistant", "content": text})
-            if len(messages) > 8:
-                messages = messages[-8:]
+            if len(messages) > 4:
+                messages = messages[-4:]
 
             # Extract and log thinking phase; append to thought history for next turn
             think_match = re.search(r"<thinking\s*>.*?</thinking\s*>", text, re.DOTALL | re.IGNORECASE)
@@ -1278,7 +1189,7 @@ User wants to open Edge. I will use OPEN_APP — the system handles opening it. 
                 retry_text = call_gemini(
                     system, nudge, img,
                     conversation_messages=None if prior_parts else messages,
-                    max_tokens=4096,
+                    max_tokens=512,
                     api_key=self.gemini_api_key_var.get().strip(),
                     model=self.gemini_model_var.get().strip() or None,
                     prior_screenshot_parts=prior_parts,
@@ -1295,7 +1206,7 @@ User wants to open Edge. I will use OPEN_APP — the system handles opening it. 
                     text = m.group(1)
             data = _parse_json(text)
             # Fallback: model returned plain action name (e.g. "CLICK_CURRENT" or "CLICK_CURRENT {}") — treat as execute so we never stop
-            _EXECUTE_ACTIONS = ("CLICK", "CLICK_CURRENT", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "MENU", "KEYS", "KEY_PRESS", "TYPE_TEXT", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL")
+            _EXECUTE_ACTIONS = ("CLICK", "CLICK_CURRENT", "CLICK_XY", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "MENU", "KEYS", "KEY_PRESS", "TYPE_TEXT", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL")
             def _parse_bare_action(raw: str):
                 s = (raw or "").strip().upper().replace("-", "_")
                 # Match "CLICK_CURRENT", "CLICK_CURRENT {}", "CLICK_CURRENT {}" (with space), etc.
@@ -1330,7 +1241,7 @@ User wants to open Edge. I will use OPEN_APP — the system handles opening it. 
                         playing_as = "white"
                     return ("start_chess", {"reason": params.get("reason", "Chess board visible."), "playing_as": playing_as}, messages, thought_history, img)
                 return ("start_chess", {"reason": "Chess board visible.", "playing_as": "white"}, messages, thought_history, img)
-            if a_norm in ("CLICK", "CLICK_CURRENT", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "MENU", "KEYS", "KEY_PRESS", "TYPE_TEXT", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL"):
+            if a_norm in ("CLICK", "CLICK_CURRENT", "CLICK_XY", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "MENU", "KEYS", "KEY_PRESS", "TYPE_TEXT", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL"):
                 params = data.get("parameters", data)
                 act = "KEYS" if a_norm == "KEY_PRESS" else a_norm
                 return ("execute", {"action": act, "parameters": params if isinstance(params, dict) else {}}, messages, thought_history, img)
@@ -1340,7 +1251,7 @@ User wants to open Edge. I will use OPEN_APP — the system handles opening it. 
                     inner = _parse_json(msg.strip())
                     if isinstance(inner, dict):
                         ia = (inner.get("action") or "").upper().replace(" ", "_").replace("-", "_")
-                        if ia in ("CLICK", "CLICK_CURRENT", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "MENU", "KEYS", "KEY_PRESS", "TYPE_TEXT", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL"):
+                        if ia in ("CLICK", "CLICK_CURRENT", "CLICK_XY", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "MENU", "KEYS", "KEY_PRESS", "TYPE_TEXT", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL"):
                             params = inner.get("parameters", inner)
                             act = "KEYS" if ia == "KEY_PRESS" else ia
                             return ("execute", {"action": act, "parameters": params if isinstance(params, dict) else {}}, messages, thought_history, img)
@@ -1350,12 +1261,12 @@ User wants to open Edge. I will use OPEN_APP — the system handles opening it. 
                 action = "type_text"
             elif action == "taskcomplete":
                 action = "task_complete"
-            if action in ("click", "double_click", "type_in", "menu", "keys", "type_text", "task_complete", "open_app", "open_url"):
+            if action in ("click", "click_xy", "double_click", "type_in", "menu", "keys", "type_text", "task_complete", "open_app", "open_url"):
                 params = data.get("parameters", data)
                 act = "KEYS" if action == "keys" else action.upper().replace(" ", "_")
                 return ("execute", {"action": act, "parameters": params if isinstance(params, dict) else {}}, messages, thought_history, img)
             a_upper = str(raw_action).upper().replace(" ", "_").replace("-", "_")
-            if a_upper in ("CLICK", "CLICK_CURRENT", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "MENU", "KEYS", "KEY_PRESS", "TYPE_TEXT", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL"):
+            if a_upper in ("CLICK", "CLICK_CURRENT", "CLICK_XY", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "MENU", "KEYS", "KEY_PRESS", "TYPE_TEXT", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL"):
                 params = data.get("parameters", data)
                 act = "KEYS" if a_upper == "KEY_PRESS" else a_upper
                 return ("execute", {"action": act, "parameters": params if isinstance(params, dict) else {}}, messages, thought_history, img)
@@ -1385,7 +1296,7 @@ User wants to open Edge. I will use OPEN_APP — the system handles opening it. 
                     if str(playing_as).lower() not in ("white", "black"):
                         playing_as = "white"
                     return ("start_chess", {"reason": p.get("reason", "Chess board visible.") if isinstance(p, dict) else "Chess board visible.", "playing_as": str(playing_as).lower()}, messages, thought_history, img)
-                if a in ("CLICK", "CLICK_CURRENT", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "MENU", "KEYS", "KEY_PRESS", "TYPE_TEXT", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL"):
+                if a in ("CLICK", "CLICK_CURRENT", "CLICK_XY", "MOVE_TO", "DOUBLE_CLICK", "TYPE_IN", "MENU", "KEYS", "KEY_PRESS", "TYPE_TEXT", "TASK_COMPLETE", "OPEN_APP", "OPEN_URL"):
                     p = obj.get("parameters", obj)
                     act = "KEYS" if a == "KEY_PRESS" else a
                     return ("execute", {"action": act, "parameters": p if isinstance(p, dict) else {}}, messages, thought_history, img)
@@ -1736,9 +1647,9 @@ User wants to open Edge. I will use OPEN_APP — the system handles opening it. 
 
                     self.log(f"  Executing: {act} {params}", "action")
                     self._hide_for_screenshot()
-                    time.sleep(0.1)
+                    time.sleep(0.05)
                     ok, result = _execute_action(action_dict, sw, sh)
-                    time.sleep(1.0)
+                    time.sleep(0.3)
                     self._show_after_screenshot()
 
                     action_history.append(f"{act}: {result}")
@@ -1763,10 +1674,32 @@ User wants to open Edge. I will use OPEN_APP — the system handles opening it. 
                         _same_click_count = 0
                         _last_click_pos = None
 
-                    # ── MOVE_TO commitment tracker ──
-                    # Remember if this was a MOVE_TO so we can force the model to
-                    # follow up with CLICK_CURRENT / MOVE_TO and not wander off.
-                    if act == "MOVE_TO":
+                    # ── Auto-click after MOVE_TO ──
+                    # If cursor landed close enough to the intended target, click immediately
+                    # instead of wasting a round-trip asking the model to verify.
+                    if act == "MOVE_TO" and ok:
+                        _mt_params = params if isinstance(params, dict) else {}
+                        _mt_x, _mt_y = _mt_params.get("x"), _mt_params.get("y")
+                        if _mt_x is not None and _mt_y is not None:
+                            # Verify cursor actually landed near the target
+                            cur_pos = pyautogui.position()
+                            scale = 1024 / max(sw, sh) if max(sw, sh) > 1024 else 1.0
+                            m_w = max(1, int(sw * scale))
+                            m_h = max(1, int(sh * scale))
+                            target_sx = int(round(int(_mt_x) * sw / m_w))
+                            target_sy = int(round(int(_mt_y) * sh / m_h))
+                            dist = ((cur_pos.x - target_sx)**2 + (cur_pos.y - target_sy)**2) ** 0.5
+                            if dist < 25:
+                                time.sleep(0.05)
+                                pyautogui.click()
+                                self.log(f"  -> Auto-clicked at ({cur_pos.x},{cur_pos.y}) (cursor within {int(dist)}px of target)", "info")
+                                action_history.append(f"AUTO_CLICK: at ({cur_pos.x},{cur_pos.y})")
+                                _last_was_move_to = None
+                            else:
+                                _last_was_move_to = (int(_mt_x), int(_mt_y))
+                        else:
+                            _last_was_move_to = None
+                    elif act == "MOVE_TO":
                         _mt_params = params if isinstance(params, dict) else {}
                         _last_was_move_to = (_mt_params.get("x"), _mt_params.get("y"))
                     else:

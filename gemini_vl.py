@@ -13,8 +13,8 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 GEMINI_DEFAULT_MODEL = "gemini-2.0-flash"
 
 # Retry on rate-limit / empty-response with exponential backoff
-MAX_RETRIES = 5
-RETRY_BACKOFF = [2, 4, 8, 15, 30]  # seconds
+MAX_RETRIES = 3
+RETRY_BACKOFF = [1, 3, 6]  # seconds
 
 # Stop waiting after this many seconds so we never hang (e.g. when API stalls)
 REQUEST_TIMEOUT_SEC = 10
