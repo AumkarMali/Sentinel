@@ -200,19 +200,27 @@ def _parse_json(text: str):
 
 
 # Router system prompt (tail) — used by both GUI and process worker
-ROUTER_SYSTEM_TAIL = """You control the screen. Reply with <thinking>brief reason</thinking> then ONE JSON object.
+ROUTER_SYSTEM_TAIL = """You control the screen. Reply with <thinking>brief reasoning + grid coordinates if clicking</thinking> then ONE JSON object.
 
-CLICKING: Use CLICK_XY to click any point on screen. Read the grid overlay to get exact (x,y) coordinates of the target center, then: {"action": "CLICK_XY", "parameters": {"x": 530, "y": 270}}
-This moves the cursor and clicks in one step. Use the grid lines (labeled every 50px) to read coordinates precisely — do NOT guess.
+━━ COORDINATE GRID ━━
+The screenshot has grid lines every 50px labeled along top (x) and left (y).
+To click a target:
+1. Find the grid line just LEFT of the target → base x. Estimate pixels right → x = base + offset.
+2. Find the grid line just ABOVE the target → base y. Estimate pixels down → y = base + offset.
+3. Use CLICK_XY with those coordinates — it moves AND clicks in one step.
+NEVER guess coordinates. Read them from the grid lines you see in the image.
+
+If a UI element name is listed below, prefer CLICK by name (more reliable):
+{"action": "CLICK", "parameters": {"element": "Play"}}
 
 Chess: pieces at BOTTOM = user's color. Light at bottom → "white", dark → "black".
 - Board visible: {"action": "start_chess", "parameters": {"reason": "...", "playing_as": "white"}}
 - No board: {"action": "comment", "message": "No chess board visible."}
 
 Actions (one per turn):
-- CLICK_XY: move+click at (x,y) from grid: {"action": "CLICK_XY", "parameters": {"x": 400, "y": 300}}
+- CLICK_XY (move+click at grid coordinates): {"action": "CLICK_XY", "parameters": {"x": 400, "y": 300}}
 - CLICK by element name: {"action": "CLICK", "parameters": {"element": "Open"}}
-- OPEN_APP (Windows programs ONLY — Chrome, Edge, Notepad, NOT websites): {"action": "OPEN_APP", "parameters": {"program": "Chrome"}}
+- OPEN_APP (Windows programs ONLY, NOT websites): {"action": "OPEN_APP", "parameters": {"program": "Chrome"}}
 - OPEN_URL (websites, browser must be open): {"action": "OPEN_URL", "parameters": {"url": "chess.com"}}
 - KEYS: {"action": "KEYS", "parameters": {"keys": ["ctrl", "t"]}}
 - TYPE_TEXT: {"action": "TYPE_TEXT", "parameters": {"text": "hello"}}
@@ -220,7 +228,7 @@ Actions (one per turn):
 - TASK_COMPLETE: {"action": "TASK_COMPLETE", "parameters": {"message": "Done"}}
 - Observation only: {"action": "comment", "message": "..."}
 
-NEVER use KEYS to open apps (no Win, Win+R). Use OPEN_APP for programs, OPEN_URL for websites."""
+NEVER use KEYS to open apps. OPEN_APP for programs, OPEN_URL for websites."""
 
 
 def _parse_router_response(data, text: str, raw_response: str):
@@ -1062,39 +1070,54 @@ class AgentGUI:
             system = f"OVERRIDE: {move_to_hint}\n\n" + system
         if thought_history:
             system += "\nPrevious reasoning:\n"
-            for prev in thought_history[-2:]:
+            for prev in thought_history[-5:]:
                 system += f"  {prev[:400]}\n"
         if learning:
             system += "\n" + learning
         system += """
 
-Reply: <thinking>short reason + grid coordinates if clicking</thinking> then ONE JSON object.
+Reply: <thinking>brief reasoning + EXACT grid-derived coordinates if clicking</thinking> then ONE JSON object.
 
-COORDINATE GRID: The screenshot has grid lines every 50px labeled along top (x) and left (y).
-To click a target: find the grid lines nearest to it, interpolate the center pixel, use CLICK_XY.
-Example: button center is between x=500 and x=550, near y=275 → {"action": "CLICK_XY", "parameters": {"x": 525, "y": 275}}
+━━ COORDINATE GRID — HOW TO READ IT ━━
+The screenshot has a grid overlay: faint lines every 50px, labeled 0, 50, 100, 150, 200... along the top (x) and left (y).
+To find a target's coordinates:
+1. Find the vertical grid line just LEFT of the target → that's the base x (e.g. 500).
+2. Estimate how many pixels RIGHT of that line the target center is → add to base (e.g. +25 → x=525).
+3. Find the horizontal grid line just ABOVE the target → base y (e.g. 250).
+4. Estimate pixels BELOW that line → add to base (e.g. +25 → y=275).
+5. State these in <thinking> BEFORE outputting the action.
+
+CLICKING: Use CLICK_XY — it moves the cursor to (x,y) AND clicks in one step.
+{"action": "CLICK_XY", "parameters": {"x": 525, "y": 275}}
+NEVER guess coordinates. ALWAYS read them from the grid lines in the image.
+
+If a clickable UI element name is listed, prefer CLICK by name (more reliable than coordinates):
+{"action": "CLICK", "parameters": {"element": "Play"}}
 
 Actions:
-- CLICK_XY (move cursor to x,y AND click — use grid to get exact coordinates): {"action": "CLICK_XY", "parameters": {"x": 400, "y": 300}}
+- CLICK_XY: move+click at grid-derived (x,y): {"action": "CLICK_XY", "parameters": {"x": 400, "y": 300}}
 - CLICK by element name: {"action": "CLICK", "parameters": {"element": "Open"}}
-- OPEN_APP (Windows programs ONLY, NOT websites): {"action": "OPEN_APP", "parameters": {"program": "Chrome"}}
+- OPEN_APP (Windows programs ONLY — NOT websites): {"action": "OPEN_APP", "parameters": {"program": "Chrome"}}
 - OPEN_URL (websites, browser must be open): {"action": "OPEN_URL", "parameters": {"url": "chess.com"}}
 - KEYS: {"action": "KEYS", "parameters": {"keys": ["ctrl", "t"]}}
 - TYPE_TEXT: {"action": "TYPE_TEXT", "parameters": {"text": "hello"}}
 - TYPE_IN: {"action": "TYPE_IN", "parameters": {"element": "Search", "text": "query"}}
 - TASK_COMPLETE: {"action": "TASK_COMPLETE", "parameters": {"message": "Done"}}
-- SCREEN_LOADING: {"action": "SCREEN_LOADING", "parameters": {}}
-- start_chess (board visible, pieces at bottom = user's color): {"action": "start_chess", "parameters": {"reason": "Board visible", "playing_as": "white"}}
-- MOVE_TO (move only, no click): {"action": "MOVE_TO", "parameters": {"x": 400, "y": 300}}
-- CLICK_CURRENT (click where cursor is): {"action": "CLICK_CURRENT", "parameters": {}}
+- SCREEN_LOADING (page still loading): {"action": "SCREEN_LOADING", "parameters": {}}
+- start_chess (board visible): {"action": "start_chess", "parameters": {"reason": "Board visible", "playing_as": "white"}}
 
-PREFER CLICK_XY over MOVE_TO+CLICK_CURRENT. CLICK_XY moves and clicks in ONE step.
-NEVER use KEYS to open apps. OPEN_APP is for programs only; OPEN_URL for websites."""
+NEVER use KEYS to open apps. OPEN_APP for programs, OPEN_URL for websites.
+NEVER click blindly. If CLICK_XY missed the target (check next screenshot), try CLICK by element name or re-read the grid more carefully."""
 
         model_w, model_h = img.size
-        user_text = f"Task: {task}\n\nActions so far:\n{history_str or '  (none yet)'}\n\nNext action?"
-        user_text += f"\nImage: {model_w}x{model_h}. Cursor at ({cur_mx},{cur_my}). Grid every 50px."
-        user_text += "\nUse CLICK_XY with grid-derived coordinates to click targets in one step."
+        last_action_str = action_history[-1] if action_history else "(none)"
+        user_text = f"Task: {task}\n\nActions so far:\n{history_str or '  (none yet)'}"
+        user_text += f"\n\nLast action result: {last_action_str}"
+        user_text += "\nLook at this NEW screenshot — did your last action work? If the screen didn't change after a click, the click MISSED. Try a different approach."
+        user_text += f"\n\nScreenshot: {model_w}x{model_h}. Cursor currently at ({cur_mx},{cur_my})."
+        user_text += f"\nGrid: lines every 50px labeled 0,50,100,... along top (x) and left (y). Range: x=0..{model_w-1}, y=0..{model_h-1}."
+        user_text += "\nTo click: read target center from nearest grid lines → CLICK_XY. If a UI element name matches, prefer CLICK by name."
+        user_text += "\n\nWhat is the next action?"
         if move_to_hint:
             user_text += f"\n{move_to_hint}"
         if stuck_hint:
@@ -1149,8 +1172,8 @@ NEVER use KEYS to open apps. OPEN_APP is for programs only; OPEN_URL for website
                         raise
             messages.append({"role": "user", "content": user_text})
             messages.append({"role": "assistant", "content": text})
-            if len(messages) > 4:
-                messages = messages[-4:]
+            if len(messages) > 6:
+                messages = messages[-6:]
 
             # Extract and log thinking phase; append to thought history for next turn
             think_match = re.search(r"<thinking\s*>.*?</thinking\s*>", text, re.DOTALL | re.IGNORECASE)
@@ -1663,9 +1686,9 @@ NEVER use KEYS to open apps. OPEN_APP is for programs only; OPEN_URL for website
                     # ── Repeated-click guard ──
                     import re as _re
                     _click_pos_match = _re.search(r"\((\d+),\s*(\d+)\)", result or "")
-                    if act == "CLICK_CURRENT" and _click_pos_match:
+                    if act in ("CLICK_CURRENT", "CLICK_XY") and _click_pos_match:
                         _pos = (int(_click_pos_match.group(1)), int(_click_pos_match.group(2)))
-                        if _pos == _last_click_pos:
+                        if _last_click_pos and abs(_pos[0] - _last_click_pos[0]) < 30 and abs(_pos[1] - _last_click_pos[1]) < 30:
                             _same_click_count += 1
                         else:
                             _same_click_count = 1
@@ -1727,18 +1750,15 @@ NEVER use KEYS to open apps. OPEN_APP is for programs only; OPEN_URL for website
 
                 # ── Repeated-click nudge ──
                 _stuck_hint = None
-                if _same_click_count >= 3 and _last_click_pos:
+                if _same_click_count >= 2 and _last_click_pos:
                     _stuck_hint = (
-                        f"⚠️ WARNING: You have used CLICK_CURRENT at position {_last_click_pos} "
-                        f"{_same_click_count} times in a row and the screen has NOT changed. "
-                        "That click is NOT registering or the element is not there. "
-                        "STOP clicking that spot. Try a completely different approach:\n"
+                        f"⚠️ WARNING: You clicked at {_last_click_pos} {_same_click_count} times but the screen did NOT change. "
+                        "That click is missing the target. STOP and try a DIFFERENT approach:\n"
+                        "  • Use CLICK with the element name from the UI elements list (most reliable).\n"
+                        "  • Re-read the grid lines carefully and use CLICK_XY with corrected coordinates.\n"
+                        "  • Use KEYS (Tab, Enter, F5) to interact without clicking.\n"
                         "  • Use OPEN_URL if you need to navigate to a website.\n"
-                        "  • Use KEYS (e.g. Tab, Enter, F5) to interact without clicking.\n"
-                        "  • Use CLICK with the element name from the UI elements list.\n"
-                        "  • Use MOVE_TO to a DIFFERENT position on screen and then CLICK_CURRENT.\n"
-                        "  • Scroll the page first (KEYS with 'pgdn' or 'space').\n"
-                        "Do NOT issue another CLICK_CURRENT at the same position."
+                        "Do NOT click the same position again."
                     )
                     self.log(f"  ⚠ Stuck: CLICK_CURRENT at {_last_click_pos} x{_same_click_count} — injecting corrective hint.", "error")
 
