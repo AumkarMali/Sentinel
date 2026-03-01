@@ -26,8 +26,12 @@ Unified GUI: type a task → screenshot is sent to **Gemini** → Gemini either 
 
 ## Run
 
+The app uses the **Electron** UI (floating dot, task panel, settings). From the project root:
+
 ```bash
-python gui.py
+cd electron-gui
+npm install
+npm start
 ```
 
-Enter a task (e.g. *play chess* or *open Notepad*) and click **Start**. With a Gemini key set, the app takes a screenshot and asks Gemini; for chess tasks it starts the bot if Gemini sees a board.
+Then open the task window from the floating dot, enter a task (e.g. *play chess* or *open Notepad*), and start. The **Python backend** (`agent_backend.py`) runs headless: it takes the prompt, hides the app windows, takes screenshots, and runs the same flow as the reference implementation. When the task finishes (or you stop it), the windows reappear. Settings (Gemini API key, model, YOLO confidence, Stockfish depth, scan interval, click delay) match the reference `gui.py` and are stored in `config.json`. `gui.py` is reference only; the app does not use it to run tasks.

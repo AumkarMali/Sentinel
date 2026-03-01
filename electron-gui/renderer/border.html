@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Border</title>
+  <style>
+    * { margin: 0; padding: 0; }
+
+    body {
+      background: transparent;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    .border-frame {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.8s ease;
+    }
+
+    .border-frame.visible {
+      opacity: 1;
+    }
+
+    .glow {
+      position: absolute;
+      border-radius: 8px;
+    }
+
+    /* Thin gradient lines on each edge — clockwise flow: top→right→bottom→left */
+    .glow-top {
+      top: 0; left: 0; right: 0; height: 3px;
+      background: linear-gradient(90deg,
+        transparent 0%,
+        rgb(120, 60, 255) 15%,
+        rgb(180, 80, 255) 30%,
+        rgb(255, 100, 200) 50%,
+        rgb(100, 220, 255) 70%,
+        rgb(120, 60, 255) 85%,
+        transparent 100%
+      );
+      box-shadow: 0 0 16px 4px rgba(140, 80, 255, 0.35), 0 0 32px 8px rgba(180, 100, 255, 0.2);
+      animation: shimmer-h 8s linear infinite;
+    }
+
+    .glow-right {
+      top: 0; bottom: 0; right: 0; width: 3px;
+      background: linear-gradient(180deg,
+        transparent 0%,
+        rgb(120, 60, 255) 15%,
+        rgb(180, 80, 255) 30%,
+        rgb(255, 100, 200) 50%,
+        rgb(100, 220, 255) 70%,
+        rgb(120, 60, 255) 85%,
+        transparent 100%
+      );
+      box-shadow: 0 0 16px 4px rgba(140, 80, 255, 0.35), 0 0 32px 8px rgba(180, 100, 255, 0.2);
+      animation: shimmer-v 8s linear infinite 2s;
+    }
+
+    .glow-bottom {
+      bottom: 0; left: 0; right: 0; height: 3px;
+      background: linear-gradient(270deg,
+        transparent 0%,
+        rgb(120, 60, 255) 15%,
+        rgb(180, 80, 255) 30%,
+        rgb(255, 100, 200) 50%,
+        rgb(100, 220, 255) 70%,
+        rgb(120, 60, 255) 85%,
+        transparent 100%
+      );
+      box-shadow: 0 0 16px 4px rgba(140, 80, 255, 0.35), 0 0 32px 8px rgba(180, 100, 255, 0.2);
+      animation: shimmer-h-rev 8s linear infinite 4s;
+    }
+
+    .glow-left {
+      top: 0; bottom: 0; left: 0; width: 3px;
+      background: linear-gradient(0deg,
+        transparent 0%,
+        rgb(120, 60, 255) 15%,
+        rgb(180, 80, 255) 30%,
+        rgb(255, 100, 200) 50%,
+        rgb(100, 220, 255) 70%,
+        rgb(120, 60, 255) 85%,
+        transparent 100%
+      );
+      box-shadow: 0 0 16px 4px rgba(140, 80, 255, 0.35), 0 0 32px 8px rgba(180, 100, 255, 0.2);
+      animation: shimmer-v-rev 8s linear infinite 6s;
+    }
+
+    /* Clockwise: top L→R, right T→B, bottom R→L, left B→T */
+    @keyframes shimmer-h {
+      0%   { background-position: -200% 0; }
+      100% { background-position: 200% 0; }
+    }
+    @keyframes shimmer-h-rev {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    @keyframes shimmer-v {
+      0%   { background-position: 0 -200%; }
+      100% { background-position: 0 200%; }
+    }
+    @keyframes shimmer-v-rev {
+      0%   { background-position: 0 200%; }
+      100% { background-position: 0 -200%; }
+    }
+
+    .glow-top, .glow-bottom {
+      background-size: 200% 100%;
+    }
+
+    .glow-left, .glow-right {
+      background-size: 100% 200%;
+    }
+  </style>
+</head>
+<body>
+  <div class="border-frame" id="borderFrame">
+    <div class="glow glow-top"></div>
+    <div class="glow glow-bottom"></div>
+    <div class="glow glow-left"></div>
+    <div class="glow glow-right"></div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+    const frame = document.getElementById('borderFrame');
+    ipcRenderer.on('show-border', () => frame.classList.add('visible'));
+    ipcRenderer.on('hide-border', () => frame.classList.remove('visible'));
+  </script>
+</body>
+</html>

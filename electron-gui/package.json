@@ -1,0 +1,12 @@
+{
+  "name": "vibe-gamer",
+  "version": "1.0.0",
+  "description": "AI desktop agent with Apple Intelligence-inspired UI",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

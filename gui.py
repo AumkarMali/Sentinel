@@ -69,6 +69,8 @@ except ImportError:
 # ── config (persisted API key) ──
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+# When Electron (or anything) writes a task here, gui.py will pick it up and run it (see main()).
+TASK_PENDING_PATH = os.path.join(BASE_DIR, "task_pending.txt")
 
 
 def _load_config():
@@ -963,6 +965,8 @@ class AgentGUI:
         ts = time.strftime("%H:%M:%S")
         line = f"[{ts}] {msg}\n"
         self.root.after(0, self._log_insert, line, tag)
+        # Echo same log to terminal (original format)
+        print(line, end="", file=sys.stderr, flush=True)
 
     def _log_insert(self, line, tag):
         self.log_text.insert(tk.END, line, tag)
@@ -2078,9 +2082,124 @@ NEVER click blindly. If CLICK_XY missed the target (check next screenshot), try 
 # ======================================================================
 def main():
     root = tk.Tk()
-    AgentGUI(root)
+    root.withdraw()  # keep window hidden; Electron sends tasks via task_pending.txt
+    root.geometry("1x1+-10000+-10000")  # tiny and off-screen if ever shown
+    app = AgentGUI(root)
+
+    def poll_pending_task():
+        """If task_pending.txt exists with content, run that task (so Electron or another process can send tasks)."""
+        try:
+            if os.path.isfile(TASK_PENDING_PATH):
+                with open(TASK_PENDING_PATH, "r", encoding="utf-8") as f:
+                    task = f.read().strip()
+                try:
+                    os.remove(TASK_PENDING_PATH)
+                except OSError:
+                    pass
+                if task and not app._running:
+                    root.after(0, lambda: _inject_task(app, root, task))
+        except Exception:
+            pass
+        root.after(1500, poll_pending_task)
+
+    def _inject_task(app, root, task):
+        if app._running:
+            return
+        app.task_text.delete("1.0", tk.END)
+        app.task_text.insert("1.0", task)
+        app._start()
+
+    root.after(1500, poll_pending_task)
+    root.mainloop()
+
+
+def run_headless(task: str):
+    """Run the agent headless for Electron: no window, log as JSON lines to stdout."""
+    root = tk.Tk()
+    root.withdraw()
+    app = AgentGUI(root)
+
+    def json_log(msg, tag=""):
+        print(json.dumps({"type": "log", "msg": msg, "tag": (tag or "info").strip() or "info"}), flush=True)
+
+    app.log = json_log
+    app.task_text.delete("1.0", tk.END)
+    app.task_text.insert("1.0", task)
+    app._start()
+
+    def check_done():
+        if not app._running and (app._thread is None or not app._thread.is_alive()):
+            print(json.dumps({"type": "done", "message": "Done"}), flush=True)
+            try:
+                root.quit()
+            except Exception:
+                pass
+            return
+        root.after(300, check_done)
+
+    root.after(300, check_done)
+    root.mainloop()
+
+
+def run_stdin_loop():
+    """Run gui.py headless: read one task per line from stdin, run it (same flow as GUI), log JSON to stdout.
+    Used when Electron (or a terminal) sends tasks to this process. Process stays running for multiple tasks.
+    """
+    root = tk.Tk()
+    root.withdraw()
+    app = AgentGUI(root)
+
+    def json_log(msg, tag=""):
+        print(json.dumps({"type": "log", "msg": msg, "tag": (tag or "info").strip() or "info"}), flush=True)
+
+    app.log = json_log
+
+    app._stdin_done_emitted = True
+
+    def inject_task(task):
+        task = (task or "").strip()
+        if not task:
+            return
+        if app._running:
+            app.log("Still running previous task; finish or wait before sending another.", "warning")
+            return
+        app._stdin_done_emitted = False
+        app.task_text.delete("1.0", tk.END)
+        app.task_text.insert("1.0", task)
+        app._start()
+
+    def check_task_done():
+        if not app._running and not getattr(app, "_stdin_done_emitted", True):
+            app._stdin_done_emitted = True
+            if app._thread is None or not app._thread.is_alive():
+                print(json.dumps({"type": "done", "message": "Done"}), flush=True)
+        root.after(300, check_task_done)
+
+    root.after(300, check_task_done)
+
+    def stdin_loop():
+        while True:
+            try:
+                line = sys.stdin.readline()
+                if not line:
+                    break
+                task = line.strip()
+                if not task or task.lower() in ("exit", "quit"):
+                    break
+                root.after(0, lambda t=task: inject_task(t))
+            except (EOFError, BrokenPipeError):
+                break
+
+    threading.Thread(target=stdin_loop, daemon=True).start()
     root.mainloop()
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) >= 2 and sys.argv[1] == "--stdin":
+        run_stdin_loop()
+    elif len(sys.argv) >= 3 and sys.argv[1] == "--task-headless":
+        task = " ".join(sys.argv[2:])
+        run_headless(task)
+    else:
+        # Normal GUI; also watches task_pending.txt so Electron (or anything) can send tasks by writing that file
+        main()
