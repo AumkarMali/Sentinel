@@ -1979,7 +1979,7 @@ NEVER click blindly. If CLICK_XY missed the target (check next screenshot), try 
                         self._hide_for_screenshot()
                         ss2 = pyautogui.screenshot()
                         self._show_after_screenshot()
-                        self.chess.capture_post_move_fen(ss2, self.conf_var.get())
+                        self.chess.capture_post_move_fen(ss2, self.conf_var.get(), playing_as=self.turn_var.get())
 
                         # ── Move-registration check ──
                         # If the board looks identical to before our drag, the site

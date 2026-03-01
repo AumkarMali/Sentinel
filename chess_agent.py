@@ -161,8 +161,30 @@ def _collision_rate(pieces, board_box):
     return collisions / len(pieces)
 
 
-def detections_to_board(pieces, board_box):
-    """Map YOLO-detected pieces onto an 8x8 chess.Board."""
+def _auto_detect_orientation(pieces):
+    """Guess board orientation from piece y-positions (white at bottom → 'white')."""
+    white_y, white_n = 0, 0
+    black_y, black_n = 0, 0
+    for p in pieces:
+        if p["label"].startswith("white"):
+            white_y += p["cy"]; white_n += 1
+        elif p["label"].startswith("black"):
+            black_y += p["cy"]; black_n += 1
+    if white_n == 0 or black_n == 0:
+        return "white"
+    return "white" if (white_y / white_n) > (black_y / black_n) else "black"
+
+
+def detections_to_board(pieces, board_box, playing_as=None):
+    """Map YOLO-detected pieces onto an 8x8 chess.Board.
+
+    Parameters
+    ----------
+    playing_as : str or None
+        "white" or "black" — the color the user is playing.  When provided this
+        is used as the board orientation (on chess.com / lichess the player's
+        color is always at the bottom).  Falls back to auto-detection when None.
+    """
     if board_box:
         bx1, by1 = board_box["x1"], board_box["y1"]
         bx2, by2 = board_box["x2"], board_box["y2"]
@@ -174,17 +196,10 @@ def detections_to_board(pieces, board_box):
     sq_w = (bx2 - bx1) / 8
     sq_h = (by2 - by1) / 8
 
-    white_y, white_n = 0, 0
-    black_y, black_n = 0, 0
-    for p in pieces:
-        if p["label"].startswith("white"):
-            white_y += p["cy"]; white_n += 1
-        elif p["label"].startswith("black"):
-            black_y += p["cy"]; black_n += 1
-
-    orientation = ("white"
-                   if (white_y / max(white_n, 1)) > (black_y / max(black_n, 1))
-                   else "black")
+    if playing_as in ("white", "black"):
+        orientation = playing_as
+    else:
+        orientation = _auto_detect_orientation(pieces)
 
     board = chess.Board(fen=None)
     board.clear()
@@ -448,18 +463,46 @@ class ChessEngine:
         res["board_box"] = board_box
 
         # ── Map to board ──
-        board, orientation = detections_to_board(pieces, board_box)
+        board, orientation = detections_to_board(pieces, board_box, playing_as=turn)
         fen_pieces = board.fen().split(" ")[0]
         our_side = chess.WHITE if turn == "white" else chess.BLACK
-        # After a board change the opponent moved → it's our turn; otherwise keep our_side
-        if self._last_fen is not None and fen_pieces != self._last_fen:
+        opp_side = chess.BLACK if our_side == chess.WHITE else chess.WHITE
+
+        STARTING_FEN_PIECES = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
+
+        if self._last_fen is None:
+            # First scan — figure out whose turn it is
+            if fen_pieces == STARTING_FEN_PIECES:
+                # Opening position: white always moves first
+                board.turn = chess.WHITE
+                self.log(f"  First scan: starting position, white to move", "info")
+            else:
+                # Mid-game start: assume it's our turn (user started the agent on their turn)
+                board.turn = our_side
+                self.log(f"  First scan: mid-game, assuming {turn}'s turn", "info")
+        elif fen_pieces != self._last_fen:
+            # Board changed since last scan → opponent moved → now it's our turn
             board.turn = our_side
         else:
-            board.turn = our_side  # default to our side so Stockfish always evaluates for us
+            # Board unchanged — keep whoever's turn it was
+            board.turn = our_side
+
         fen = board.fen()
+        self.log(f"  Orientation: {orientation} (playing_as={turn})", "dim")
 
         res["fen"] = fen
         res["orientation"] = orientation
+
+        # ── First scan as black on starting position → wait for white ──
+        if (self._last_fen is None
+                and fen_pieces == STARTING_FEN_PIECES
+                and our_side == chess.BLACK):
+            self.log("  Playing as BLACK — waiting for white's first move...", "info")
+            self._last_fen = fen_pieces
+            res["status"] = "waiting"
+            res["annotated"] = self._draw(screenshot, pieces, board_box,
+                                          orientation=orientation)
+            return res
 
         # ── Board unchanged? ──
         if self._last_fen == fen_pieces and not force_move:
@@ -484,7 +527,11 @@ class ChessEngine:
 
         # ── Board changed ──
         self._unchanged_count = 0
-        self.log(f"  {len(pieces)} pieces in {dt:.2f}s", "info")
+        self._last_fen = fen_pieces
+
+        white_count = sum(1 for p in pieces if p["label"].startswith("white"))
+        black_count = sum(1 for p in pieces if p["label"].startswith("black"))
+        self.log(f"  {len(pieces)} pieces ({white_count}W {black_count}B) in {dt:.2f}s", "info")
 
         counts = {}
         for p in pieces:
@@ -492,6 +539,8 @@ class ChessEngine:
         cstr = ", ".join(f"{n.split('_')[1][0].upper()}{c}"
                          for n, c in sorted(counts.items()) if n != "board")
         self.log(f"  Pieces: {cstr}", "piece")
+        self.log(f"  Turn: {'WHITE' if board.turn == chess.WHITE else 'BLACK'} "
+                 f"| Playing as: {turn} | Orientation: {orientation}", "info")
         self.log(f"  FEN: {fen}", "action")
 
         for line in board_ascii(board, orientation).split("\n"):
@@ -533,6 +582,15 @@ class ChessEngine:
                 return res
 
             res["status"] = "error"
+            return res
+
+        # ── Not our turn? Wait. ──
+        if board.turn != our_side:
+            self.log(f"  Not our turn (turn={'WHITE' if board.turn==chess.WHITE else 'BLACK'}, "
+                     f"we are {turn}) — waiting...", "info")
+            res["status"] = "waiting"
+            res["annotated"] = self._draw(screenshot, pieces, board_box,
+                                          orientation=orientation)
             return res
 
         # ── Stockfish ──
@@ -653,7 +711,7 @@ class ChessEngine:
     # ------------------------------------------------------------------
     #  Post-move re-scan
     # ------------------------------------------------------------------
-    def capture_post_move_fen(self, screenshot, conf):
+    def capture_post_move_fen(self, screenshot, conf, playing_as=None):
         """Re-detect the board after our move to track opponent changes.
 
         Uses the same filtering and board-box logic as analyze() so the saved
@@ -710,7 +768,7 @@ class ChessEngine:
                              "not saving FEN", "dim")
                     return
 
-                board, _ = detections_to_board(pieces, board_box)
+                board, _ = detections_to_board(pieces, board_box, playing_as=playing_as)
                 self._last_fen = board.fen().split(" ")[0]
                 self.log(f"  Saved post-move board state ({len(pieces)} pieces)", "dim")
             else:
