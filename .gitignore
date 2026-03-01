@@ -11,9 +11,6 @@ prompt_history.json
 *.egg-info/
 .eggs/
 
-# Node / Electron
-electron-gui/node_modules/
-
 # IDE
 .idea/
 .vscode/

@@ -1,9 +1,9 @@
-# Pie – AI Agent (Claude + Chess Bot)
+# Pie – AI Agent (Gemini + Chess Bot)
 
-Unified GUI: type a task → screenshot is sent to **Claude** → Claude either starts the **chess bot** (if it sees a board) or comments on the screen in the log.
+Unified GUI: type a task → screenshot is sent to **Gemini** → Gemini either starts the **chess bot** (if it sees a board) or controls the screen / comments in the log.
 
 - **Chess agent:** YOLO piece detection + Stockfish; auto-plays on sites like Lichess/Chess.com.
-- **Claude:** Task routing and screen comments (vision). No Llama/Groq.
+- **Vision:** Gemini only. Get an API key at [Google AI Studio](https://aistudio.google.com/apikey).
 
 ## Setup
 
@@ -15,29 +15,19 @@ Unified GUI: type a task → screenshot is sent to **Claude** → Claude either 
    ```
 
 2. **Stockfish (required for chess)**  
-   Download a Windows build from [Stockfish](https://stockfishchess.org/download/) and place `stockfish.exe` in the project root (or use the [latest release](https://github.com/official-stockfish/Stockfish/releases)).
+   Download a Windows build from [Stockfish](https://stockfishchess.org/download/) and place `stockfish.exe` in the project root.
 
 3. **Chess YOLO model (required for chess)**  
    Place the chess piece detection model as `chess_model.pt` in the project root.  
    Example: [NAKSTStudio/yolov8m-chess-piece-detection](https://huggingface.co/NAKSTStudio/yolov8m-chess-piece-detection) – download `best.pt` and rename to `chess_model.pt`.
 
-4. **Claude API key**  
-   In the app: **Settings → Claude API Key**. Get a key from [Anthropic](https://console.anthropic.com/).
+4. **Gemini API key**  
+   In the app open **Settings** and enter your **Gemini API Key**. Get a key at [Google AI Studio](https://aistudio.google.com/apikey). Models: `gemini-2.0-flash`, `gemini-1.5-flash`, `gemini-1.5-pro`.
 
-## Run the desktop app (Electron)
-
-```bash
-cd electron-gui
-npm install
-npm start
-```
-
-See `electron-gui/README.md` for details. The floating dot opens the task/settings panels; the Python agent runs when you start a task.
-
-## Run the Python GUI (legacy)
+## Run
 
 ```bash
 python gui.py
 ```
 
-Enter a task (e.g. *play chess* or *what’s on my screen?*) and click **Start**. With a Claude key set, the app takes a screenshot and asks Claude; for chess tasks it only starts the bot if Claude sees a board.
+Enter a task (e.g. *play chess* or *open Notepad*) and click **Start**. With a Gemini key set, the app takes a screenshot and asks Gemini; for chess tasks it starts the bot if Gemini sees a board.
