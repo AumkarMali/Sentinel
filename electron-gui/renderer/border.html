@@ -30,91 +30,83 @@
       border-radius: 8px;
     }
 
-    /* Thin soft pastel gradient lines on each edge, fading inward */
+    /* Thin gradient lines on each edge — clockwise flow: top→right→bottom→left */
     .glow-top {
-      top: 0; left: 0; right: 0; height: 8px;
+      top: 0; left: 0; right: 0; height: 3px;
       background: linear-gradient(90deg,
         transparent 0%,
-        rgb(120, 60, 255) 12%,
-        rgb(180, 80, 255) 25%,
-        rgb(255, 100, 200) 38%,
-        rgb(255, 160, 100) 50%,
-        rgb(100, 220, 255) 62%,
-        rgb(60, 180, 255) 75%,
-        rgb(120, 60, 255) 88%,
+        rgb(120, 60, 255) 15%,
+        rgb(180, 80, 255) 30%,
+        rgb(255, 100, 200) 50%,
+        rgb(100, 220, 255) 70%,
+        rgb(120, 60, 255) 85%,
         transparent 100%
       );
-      box-shadow:
-        0 0 24px 8px rgba(140, 80, 255, 0.4),
-        0 0 60px 16px rgba(180, 100, 255, 0.2);
+      box-shadow: 0 0 16px 4px rgba(140, 80, 255, 0.35), 0 0 32px 8px rgba(180, 100, 255, 0.2);
       animation: shimmer-h 8s linear infinite;
     }
 
-    .glow-bottom {
-      bottom: 0; left: 0; right: 0; height: 8px;
-      background: linear-gradient(90deg,
-        transparent 0%,
-        rgb(60, 180, 255) 12%,
-        rgb(100, 220, 255) 25%,
-        rgb(255, 160, 100) 38%,
-        rgb(255, 100, 200) 50%,
-        rgb(180, 80, 255) 62%,
-        rgb(120, 60, 255) 75%,
-        rgb(60, 180, 255) 88%,
-        transparent 100%
-      );
-      box-shadow:
-        0 0 24px 8px rgba(140, 80, 255, 0.4),
-        0 0 60px 16px rgba(180, 100, 255, 0.2);
-      animation: shimmer-h 8s linear infinite 4s;
-    }
-
-    .glow-left {
-      top: 0; bottom: 0; left: 0; width: 8px;
+    .glow-right {
+      top: 0; bottom: 0; right: 0; width: 3px;
       background: linear-gradient(180deg,
         transparent 0%,
-        rgb(120, 60, 255) 12%,
-        rgb(180, 80, 255) 25%,
-        rgb(255, 100, 200) 38%,
-        rgb(255, 160, 100) 50%,
-        rgb(100, 220, 255) 62%,
-        rgb(60, 180, 255) 75%,
-        rgb(120, 60, 255) 88%,
+        rgb(120, 60, 255) 15%,
+        rgb(180, 80, 255) 30%,
+        rgb(255, 100, 200) 50%,
+        rgb(100, 220, 255) 70%,
+        rgb(120, 60, 255) 85%,
         transparent 100%
       );
-      box-shadow:
-        0 0 24px 8px rgba(140, 80, 255, 0.4),
-        0 0 60px 16px rgba(180, 100, 255, 0.2);
+      box-shadow: 0 0 16px 4px rgba(140, 80, 255, 0.35), 0 0 32px 8px rgba(180, 100, 255, 0.2);
       animation: shimmer-v 8s linear infinite 2s;
     }
 
-    .glow-right {
-      top: 0; bottom: 0; right: 0; width: 8px;
-      background: linear-gradient(180deg,
+    .glow-bottom {
+      bottom: 0; left: 0; right: 0; height: 3px;
+      background: linear-gradient(270deg,
         transparent 0%,
-        rgb(60, 180, 255) 12%,
-        rgb(100, 220, 255) 25%,
-        rgb(255, 160, 100) 38%,
+        rgb(120, 60, 255) 15%,
+        rgb(180, 80, 255) 30%,
         rgb(255, 100, 200) 50%,
-        rgb(180, 80, 255) 62%,
-        rgb(120, 60, 255) 75%,
-        rgb(60, 180, 255) 88%,
+        rgb(100, 220, 255) 70%,
+        rgb(120, 60, 255) 85%,
         transparent 100%
       );
-      box-shadow:
-        0 0 24px 8px rgba(140, 80, 255, 0.4),
-        0 0 60px 16px rgba(180, 100, 255, 0.2);
-      animation: shimmer-v 8s linear infinite 6s;
+      box-shadow: 0 0 16px 4px rgba(140, 80, 255, 0.35), 0 0 32px 8px rgba(180, 100, 255, 0.2);
+      animation: shimmer-h-rev 8s linear infinite 4s;
     }
 
+    .glow-left {
+      top: 0; bottom: 0; left: 0; width: 3px;
+      background: linear-gradient(0deg,
+        transparent 0%,
+        rgb(120, 60, 255) 15%,
+        rgb(180, 80, 255) 30%,
+        rgb(255, 100, 200) 50%,
+        rgb(100, 220, 255) 70%,
+        rgb(120, 60, 255) 85%,
+        transparent 100%
+      );
+      box-shadow: 0 0 16px 4px rgba(140, 80, 255, 0.35), 0 0 32px 8px rgba(180, 100, 255, 0.2);
+      animation: shimmer-v-rev 8s linear infinite 6s;
+    }
+
+    /* Clockwise: top L→R, right T→B, bottom R→L, left B→T */
     @keyframes shimmer-h {
       0%   { background-position: -200% 0; }
       100% { background-position: 200% 0; }
     }
-
+    @keyframes shimmer-h-rev {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
     @keyframes shimmer-v {
       0%   { background-position: 0 -200%; }
       100% { background-position: 0 200%; }
+    }
+    @keyframes shimmer-v-rev {
+      0%   { background-position: 0 200%; }
+      100% { background-position: 0 -200%; }
     }
 
     .glow-top, .glow-bottom {
@@ -124,20 +116,6 @@
     .glow-left, .glow-right {
       background-size: 100% 200%;
     }
-
-    /* Soft corner accents */
-    .corner {
-      position: absolute;
-      width: 80px;
-      height: 80px;
-      border-radius: 50%;
-      background: radial-gradient(circle, rgba(150, 80, 255, 0.55), rgba(100, 200, 255, 0.2) 50%, transparent 70%);
-      filter: blur(10px);
-    }
-    .corner-tl { top: -4px; left: -4px; }
-    .corner-tr { top: -4px; right: -4px; }
-    .corner-bl { bottom: -4px; left: -4px; }
-    .corner-br { bottom: -4px; right: -4px; }
   </style>
 </head>
 <body>
@@ -146,10 +124,6 @@
     <div class="glow glow-bottom"></div>
     <div class="glow glow-left"></div>
     <div class="glow glow-right"></div>
-    <div class="corner corner-tl"></div>
-    <div class="corner corner-tr"></div>
-    <div class="corner corner-bl"></div>
-    <div class="corner corner-br"></div>
   </div>
 
   <script>

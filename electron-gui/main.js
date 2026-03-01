@@ -13,7 +13,7 @@ let borderWindow = null;
 let agentProcess = null;
 
 const DOT_SIZE = 80;
-const EXPANDED_SIZE = 340;
+const EXPANDED_SIZE = 480;
 
 // ── Config (reads/writes the same config.json the Python code uses) ──
 
@@ -48,6 +48,7 @@ function createDotWindow() {
     resizable: false,
     skipTaskbar: true,
     hasShadow: false,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -55,6 +56,9 @@ function createDotWindow() {
     },
   });
 
+  dotWindow.once('ready-to-show', () => {
+    if (dotWindow && !dotWindow.isDestroyed()) dotWindow.show();
+  });
   dotWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   dotWindow.setVisibleOnAllWorkspaces(true);
   dotWindow.setMovable(true);
@@ -130,7 +134,13 @@ function createSettingsWindow() {
   });
 
   settingsWindow.loadFile(path.join(__dirname, 'renderer', 'settings.html'));
-  settingsWindow.on('closed', () => { settingsWindow = null; });
+  settingsWindow.on('closed', () => {
+    settingsWindow = null;
+    if (dotWindow && !dotWindow.isDestroyed()) {
+      dotWindow.show();
+      dotWindow.webContents.send('settings-closed');
+    }
+  });
 }
 
 // ── Rainbow screen border overlay ──
@@ -237,21 +247,27 @@ function killAgent() {
 
 ipcMain.on('dot-expand', () => {
   if (!dotWindow) return;
-  const [x, y] = dotWindow.getPosition();
-  const cx = x + DOT_SIZE / 2;
-  const cy = y + DOT_SIZE / 2;
-  const nx = Math.round(cx - EXPANDED_SIZE / 2);
-  const ny = Math.round(cy - EXPANDED_SIZE / 2);
+  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
+  const bounds = dotWindow.getBounds();
+  const cx = bounds.x + bounds.width / 2;
+  const cy = bounds.y + bounds.height / 2;
+  let nx = Math.round(cx - EXPANDED_SIZE / 2);
+  let ny = Math.round(cy - EXPANDED_SIZE / 2);
+  nx = Math.max(0, Math.min(nx, sw - EXPANDED_SIZE));
+  ny = Math.max(0, Math.min(ny, sh - EXPANDED_SIZE));
   dotWindow.setBounds({ x: nx, y: ny, width: EXPANDED_SIZE, height: EXPANDED_SIZE });
 });
 
 ipcMain.on('dot-collapse', () => {
   if (!dotWindow) return;
-  const [x, y] = dotWindow.getPosition();
-  const cx = x + EXPANDED_SIZE / 2;
-  const cy = y + EXPANDED_SIZE / 2;
-  const nx = Math.round(cx - DOT_SIZE / 2);
-  const ny = Math.round(cy - DOT_SIZE / 2);
+  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
+  const bounds = dotWindow.getBounds();
+  const cx = bounds.x + bounds.width / 2;
+  const cy = bounds.y + bounds.height / 2;
+  let nx = Math.round(cx - DOT_SIZE / 2);
+  let ny = Math.round(cy - DOT_SIZE / 2);
+  nx = Math.max(0, Math.min(nx, sw - DOT_SIZE));
+  ny = Math.max(0, Math.min(ny, sh - DOT_SIZE));
   dotWindow.setBounds({ x: nx, y: ny, width: DOT_SIZE, height: DOT_SIZE });
 });
 
@@ -262,7 +278,13 @@ ipcMain.on('drag-dot', (_e, dx, dy) => {
 });
 
 ipcMain.on('open-task', () => createTaskWindow());
-ipcMain.on('open-settings', () => createSettingsWindow());
+ipcMain.on('open-settings', () => {
+  createSettingsWindow();
+});
+
+ipcMain.on('icons-hidden', () => {
+  if (dotWindow && !dotWindow.isDestroyed()) dotWindow.hide();
+});
 
 ipcMain.on('show-border', () => showBorder());
 ipcMain.on('hide-border', () => hideBorder());
@@ -282,7 +304,13 @@ ipcMain.on('close-window', (event) => {
 });
 
 ipcMain.handle('get-config', () => loadConfig());
-ipcMain.handle('save-config', (_e, cfg) => saveConfig(cfg));
+ipcMain.handle('save-config', (_e, cfg) => {
+  const saved = saveConfig(cfg);
+  if (dotWindow && !dotWindow.isDestroyed() && saved.display_contrast != null) {
+    dotWindow.webContents.send('set-contrast', saved.display_contrast);
+  }
+  return saved;
+});
 
 ipcMain.on('start-agent', (_e, task) => startAgent(task));
 

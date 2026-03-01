@@ -32,4 +32,15 @@ contextBridge.exposeInMainWorld('api', {
   onLogUpdate: (cb) => {
     ipcRenderer.on('log-update', (_e, data) => cb(data));
   },
+
+  // Contrast for icons (dot window)
+  onContrastChange: (cb) => {
+    ipcRenderer.on('set-contrast', (_e, value) => cb(value));
+  },
+
+  // Settings lifecycle
+  hideIcons: () => ipcRenderer.send('icons-hidden'),
+  onSettingsClosed: (cb) => {
+    ipcRenderer.on('settings-closed', () => cb());
+  },
 });
