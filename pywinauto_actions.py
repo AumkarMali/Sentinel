@@ -57,7 +57,7 @@ def get_ui_elements(max_items: int = 80) -> list:
                             return out
                 except Exception:
                     continue
-        # Also try taskbar / desktop for Start, taskbar icons
+        # Taskbar via Desktop
         try:
             desktop = Desktop(backend="uia")
             taskbar = desktop.child_window(title="Taskbar", control_type="ToolBar")
@@ -78,6 +78,32 @@ def get_ui_elements(max_items: int = 80) -> list:
                                 return out
                     except Exception:
                         continue
+        except Exception:
+            pass
+        # Taskbar via explorer.exe (Windows 10/11 – often exposes taskbar icons better)
+        try:
+            app = Application(backend="uia").connect(path="explorer.exe")
+            for w in [app.window(class_name="Shell_TrayWnd"), app.window(title="Taskbar")]:
+                try:
+                    if not w.exists(timeout=1):
+                        continue
+                    for ctrl in w.descendants():
+                        try:
+                            name = (ctrl.window_text() or "").strip()
+                            if not name or len(name) > 60:
+                                continue
+                            ctype = getattr(ctrl.element_info, "control_type", None) or "Unknown"
+                            key = (name, ctype)
+                            if key in seen:
+                                continue
+                            seen.add(key)
+                            out.append({"name": name, "control_type": str(ctype)})
+                            if len(out) >= max_items:
+                                return out
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
         except Exception:
             pass
     except Exception:
@@ -152,7 +178,7 @@ def execute_action(action_dict: dict) -> tuple:
                     continue
             return False
 
-        def _find_by_scan(container, double=False, max_scan=200):
+        def _find_by_scan(container, double=False, max_scan=300, strict_type=True):
             """Walk descendants; click first control whose title contains element (taskbar/desktop)."""
             search_lower = element.strip().lower()
             if not search_lower:
@@ -162,6 +188,9 @@ def execute_action(action_dict: dict) -> tuple:
                 parts.append(element.split(",")[0].strip().lower())
             if " - " in element:
                 parts.append(element.split(" - ")[0].strip().lower())
+            # "Chrome" alone can match "Google Chrome"
+            if "google chrome" in search_lower or "chrome" in search_lower:
+                parts.append("chrome")
             n = 0
             try:
                 for ctrl in container.descendants():
@@ -172,9 +201,10 @@ def execute_action(action_dict: dict) -> tuple:
                         title = (ctrl.window_text() or "").strip()
                         if not title or not any(p in title.lower() for p in parts):
                             continue
-                        ctype = getattr(ctrl.element_info, "control_type", None) or ""
-                        if ctype not in CLICKABLE_TYPES and "Button" not in ctype:
-                            continue
+                        if strict_type:
+                            ctype = getattr(ctrl.element_info, "control_type", None) or ""
+                            if ctype not in CLICKABLE_TYPES and "Button" not in ctype:
+                                continue
                         if double:
                             ctrl.double_click_input()
                         else:
@@ -182,6 +212,32 @@ def execute_action(action_dict: dict) -> tuple:
                         return True
                     except Exception:
                         continue
+            except Exception:
+                pass
+            return False
+
+        def _try_taskbar_via_explorer():
+            """Connect to explorer.exe and find taskbar / Running applications; click matching item."""
+            try:
+                app = Application(backend="uia").connect(path="explorer.exe")
+                # Try Shell_TrayWnd (taskbar container)
+                for w in [app.window(class_name="Shell_TrayWnd"), app.window(title="Taskbar")]:
+                    try:
+                        if w.exists(timeout=1) and _find_by_scan(w, double=False, strict_type=False):
+                            return True
+                    except Exception:
+                        continue
+                # Try "Running applications" toolbar (Windows 10/11)
+                try:
+                    tb = app.child_window(title="Taskbar", control_type="ToolBar")
+                    if tb.exists(timeout=1):
+                        run_apps = tb.child_window(title="Running applications", control_type="ToolBar")
+                        if run_apps.exists(timeout=1) and _find_by_scan(run_apps, double=False, strict_type=False):
+                            return True
+                        if _find_by_scan(tb, double=False, strict_type=False):
+                            return True
+                except Exception:
+                    pass
             except Exception:
                 pass
             return False
@@ -197,6 +253,8 @@ def execute_action(action_dict: dict) -> tuple:
                     return True, f"Clicked '{element}'"
                 taskbar = desktop.child_window(title="Taskbar", control_type="ToolBar")
                 if taskbar.exists(timeout=1) and _find_by_scan(taskbar, double=False):
+                    return True, f"Clicked '{element}'"
+                if _try_taskbar_via_explorer():
                     return True, f"Clicked '{element}'"
             except Exception:
                 pass
@@ -214,6 +272,17 @@ def execute_action(action_dict: dict) -> tuple:
                 taskbar = desktop.child_window(title="Taskbar", control_type="ToolBar")
                 if taskbar.exists(timeout=1) and _find_by_scan(taskbar, double=True):
                     return True, f"Double-clicked '{element}'"
+                # Explorer taskbar (double-click to launch from taskbar if pinned)
+                try:
+                    app = Application(backend="uia").connect(path="explorer.exe")
+                    for w in [app.window(class_name="Shell_TrayWnd"), app.window(title="Taskbar")]:
+                        try:
+                            if w.exists(timeout=1) and _find_by_scan(w, double=True, strict_type=False):
+                                return True, f"Double-clicked '{element}'"
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
             except Exception:
                 pass
             return False, f"Element '{element}' not found"
@@ -222,16 +291,66 @@ def execute_action(action_dict: dict) -> tuple:
             text = params.get("text", "")
             if not text:
                 return False, "TYPE_IN requires 'text' parameter"
-            ctrl = win.child_window(title_re=f".*{_re_escape(element)}.*", control_type="Edit")
-            if not ctrl.exists(timeout=2):
-                ctrl = win.child_window(title=element, control_type="Edit")
-            if not ctrl.exists(timeout=2):
-                ctrl = win.child_window(title_re=f".*{_re_escape(element)}.*")
-            if not ctrl.exists(timeout=2):
-                return False, f"Edit element '{element}' not found"
+            el_strip = (element or "").strip()
+            # Try to find an Edit or ComboBox: by name, then common browser/OS labels
+            candidates = []
+            if el_strip:
+                candidates.append((el_strip, "Edit"))
+                candidates.append((el_strip, "ComboBox"))
+            candidates.extend([
+                ("Address and search bar", "Edit"), ("Address", "Edit"), ("Search", "Edit"),
+                ("Search or type a URL", "Edit"), ("Search the web", "Edit"),
+                ("Type here to search", "Edit"), ("Search box", "Edit"),
+            ])
+            ctrl = None
+            for name, ctype in candidates:
+                try:
+                    c = win.child_window(title_re=f".*{_re_escape(name)}.*", control_type=ctype)
+                    if c.exists(timeout=1):
+                        ctrl = c
+                        break
+                    c = win.child_window(title=name, control_type=ctype)
+                    if c.exists(timeout=1):
+                        ctrl = c
+                        break
+                except Exception:
+                    continue
+            if not ctrl or not ctrl.exists(timeout=1):
+                # Last resort: first Edit in window (e.g. single search field)
+                try:
+                    for c in win.descendants():
+                        ct = getattr(c.element_info, "control_type", None) or ""
+                        if ct in ("Edit", "ComboBox"):
+                            ctrl = c
+                            break
+                except Exception:
+                    pass
+            if not ctrl or not ctrl.exists(timeout=1):
+                return False, f"Edit/field for '{element or 'text'}' not found"
             ctrl.set_focus()
-            ctrl.set_edit_text(text)
-            return True, f"Typed into '{element}': {text[:30]}..."
+            try:
+                ctrl.click_input()
+            except Exception:
+                pass
+            import time
+            time.sleep(0.15)
+            try:
+                ctrl.set_edit_text(text)
+                return True, f"Typed into field: {text[:30]}..."
+            except Exception:
+                pass
+            # set_edit_text failed (e.g. contenteditable); type via keyboard into focused control
+            try:
+                from pynput.keyboard import Controller
+                Controller().type(text)
+                return True, f"Typed (keyboard) into field: {text[:30]}..."
+            except Exception:
+                try:
+                    import pyautogui
+                    pyautogui.write(text, interval=0.02)
+                    return True, f"Typed (keyboard) into field: {text[:30]}..."
+                except Exception as e:
+                    return False, f"TYPE_IN failed: {e}"
 
         if action == "MENU":
             path = params.get("path") or params.get("menu") or ""

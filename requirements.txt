@@ -4,10 +4,8 @@ pyautogui>=0.9.54
 pynput>=1.7.6
 numpy>=1.24.0
 
-# Vision model: Ollama (local, free) or DashScope API
-ollama>=0.3.0
-openai>=1.0.0
-torch>=2.0.0
+# Vision: Gemini only
+google-generativeai>=0.8.0
 
 # Screen control (Windows)
 pywinauto>=0.6.8
