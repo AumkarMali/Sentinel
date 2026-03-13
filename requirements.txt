@@ -1,16 +1,8 @@
 # Core
 Pillow>=10.0.0
-pyautogui>=0.9.54
-pynput>=1.7.6
-numpy>=1.24.0
+selenium>=4.15.0
+webdriver-manager>=4.0.0
+pdfplumber>=0.10.0
 
-# Vision: Gemini only
-google-generativeai>=0.8.0
-
-# Screen control (Windows)
-pywinauto>=0.6.8
-
-# Chess Agent
-ultralytics>=8.0.0
-python-chess>=1.999
-stockfish>=3.28.0
+# Gemini API
+google-genai>=1.0.0

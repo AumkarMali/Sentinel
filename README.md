@@ -1,37 +1,51 @@
-# Pie – AI Agent (Gemini + Chess Bot)
+# Sentinel — Chrome Job Automator
 
-Unified GUI: type a task → screenshot is sent to **Gemini** → Gemini either starts the **chess bot** (if it sees a board) or controls the screen / comments in the log.
+Auto-apply to internship positions from [SimplifyJobs/Summer2026-Internships](https://github.com/SimplifyJobs/Summer2026-Internships).
 
-- **Chess agent:** YOLO piece detection + Stockfish; auto-plays on sites like Lichess/Chess.com.
-- **Vision:** Gemini only. Get an API key at [Google AI Studio](https://aistudio.google.com/apikey).
+Upload your resume, click Start, and Sentinel will:
+1. Open Chrome and navigate to the internship listings
+2. Scrape open positions with apply links
+3. Visit each application page
+4. Use Gemini vision to analyze forms and fill them with your resume data
+5. Upload your resume PDF where file inputs are available
 
 ## Setup
 
-1. **Clone and install**
-   ```bash
-   git clone https://github.com/AumkarMali/pie.git
-   cd pie
-   pip install -r requirements.txt
-   ```
+```bash
+python -m venv venv
+venv\Scripts\activate       # Windows
+pip install -r requirements.txt
+```
 
-2. **Stockfish (required for chess)**  
-   Download a Windows build from [Stockfish](https://stockfishchess.org/download/) and place `stockfish.exe` in the project root.
+## Gemini API Key
 
-3. **Chess YOLO model (required for chess)**  
-   Place the chess piece detection model as `chess_model.pt` in the project root.  
-   Example: [NAKSTStudio/yolov8m-chess-piece-detection](https://huggingface.co/NAKSTStudio/yolov8m-chess-piece-detection) – download `best.pt` and rename to `chess_model.pt`.
-
-4. **Gemini API key**  
-   In the app open **Settings** and enter your **Gemini API Key**. Get a key at [Google AI Studio](https://aistudio.google.com/apikey). Models: `gemini-2.0-flash`, `gemini-1.5-flash`, `gemini-1.5-pro`.
+Get a free key at [Google AI Studio](https://aistudio.google.com/apikey). Enter it in **Settings** inside the app, or set the `GEMINI_API_KEY` environment variable.
 
 ## Run
 
-The app uses the **Electron** UI (floating dot, task panel, settings). From the project root:
-
 ```bash
-cd electron-gui
-npm install
-npm start
+python gui.py
 ```
 
-Then open the task window from the floating dot, enter a task (e.g. *play chess* or *open Notepad*), and start. The **Python backend** (`agent_backend.py`) runs headless: it takes the prompt, hides the app windows, takes screenshots, and runs the same flow as the reference implementation. When the task finishes (or you stop it), the windows reappear. Settings (Gemini API key, model, YOLO confidence, Stockfish depth, scan interval, click delay) match the reference `gui.py` and are stored in `config.json`. `gui.py` is reference only; the app does not use it to run tasks.
+1. Click **Browse** to select your resume PDF
+2. Click **Settings** to enter your Gemini API key (first time only)
+3. Click **Start Applying**
+
+## How It Works
+
+| Component | Tech |
+|-----------|------|
+| **GUI** | Tkinter |
+| **Browser automation** | Selenium + ChromeDriver |
+| **Page analysis** | Gemini vision API |
+| **Resume parsing** | pdfplumber + Gemini text extraction |
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `gui.py` | Main application GUI |
+| `job_automator.py` | Selenium automation engine |
+| `resume_parser.py` | PDF resume parser |
+| `gemini_vl.py` | Gemini API client |
+| `config.json` | Stored settings (API key, model, resume path) |

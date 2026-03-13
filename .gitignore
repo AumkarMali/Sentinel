@@ -18,10 +18,6 @@ task_pending.txt
 *.swp
 *.swo
 
-# Large binaries (download separately - see README)
-stockfish.exe
-chess_model.pt
-
 # OS
 .DS_Store
 Thumbs.db
