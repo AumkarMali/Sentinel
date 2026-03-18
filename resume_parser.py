@@ -82,44 +82,46 @@ def _parse_with_gemini(text: str, api_key: str, model: str) -> dict:
     """Use Gemini to extract structured resume data from text."""
     try:
         from google import genai
-        from google.genai import types
 
-        client = genai.Client(api_key=api_key)
+        genai.configure(api_key=api_key)
 
-        prompt = f"""Extract structured information from this resume text. Return ONLY a JSON object.
+        prompt_template = """
+Extract structured information from this resume text. Return ONLY a valid JSON object.
 
 Resume text:
 ---
-{text[:4000]}
+{text}
 ---
 
-Return this exact JSON structure (fill in what you can find, leave empty string for missing):
-{{
-    "name": "Full Name",
-    "email": "email@example.com",
-    "phone": "phone number",
-    "linkedin": "linkedin URL",
-    "github": "github URL",
-    "website": "personal website URL",
-    "location": "City, State",
-    "university": "University Name",
-    "degree": "Degree and Major",
-    "gpa": "GPA value",
-    "graduation_date": "Month Year",
-    "skills": "comma-separated list of skills",
-    "work_authorization": "yes/no/unknown"
-}}"""
+Return this exact JSON structure (fill what you can, use empty strings for missing fields):
+{json_structure}
+"""
+        json_structure = {
+            "name": "Full Name",
+            "email": "email@example.com",
+            "phone": "phone number",
+            "linkedin": "linkedin URL",
+            "github": "github URL",
+            "website": "personal website URL",
+            "location": "City, State",
+            "university": "University Name",
+            "degree": "Degree and Major",
+            "gpa": "GPA value",
+            "graduation_date": "Month Year",
+            "skills": "comma-separated list of skills"
+        }
 
-        config = types.GenerateContentConfig(
-            max_output_tokens=1024,
-            system_instruction="Extract resume information. Return only valid JSON.",
+        prompt = prompt_template.format(
+            resume_text=text[:4000],  # Use a slice to avoid overly long prompts
+            json_structure=json.dumps(json_structure, indent=4)
         )
 
-        response = client.models.generate_content(
-            model=model or "gemini-2.0-flash",
-            contents=[prompt],
-            config=config,
+        model_instance = genai.GenerativeModel(
+            model_name=model or "gemini-1.5-flash",
+            system_instruction="You are a resume parser. Extract information and return only valid JSON.",
         )
+
+        response = model_instance.generate_content(prompt)
 
         resp_text = ""
         try:
