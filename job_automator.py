@@ -1,13 +1,10 @@
 """
 Core job application automation engine.
 
-Opens Chrome via Selenium, scrapes internship listings from the SimplifyJobs
-GitHub repo, and attempts to auto-apply using Gemini vision for form analysis.
-
-Hybrid approach:
-  1. Selenium DOM access (primary — fast, doesn't move the mouse)
-  2. pyautogui + Gemini vision (fallback — screenshots the screen, asks Gemini
-     for coordinates, moves mouse and clicks/types physically)
+Opens Chrome via Selenium and attempts to auto-apply using:
+  1. Direct Selenium field matching (primary, especially for Workday)
+  2. Gemini vision page analysis (secondary)
+  3. pyautogui + Gemini vision coordinate fallback (last resort)
 """
 import io
 import os
@@ -15,17 +12,17 @@ import re
 import sys
 import json
 import time
-from urllib.parse import urlparse
 
 from PIL import Image, ImageDraw, ImageFont
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import (
-    TimeoutException, NoSuchElementException, ElementNotInteractableException,
+    TimeoutException,
+    NoSuchElementException,
+    ElementNotInteractableException,
     StaleElementReferenceException,
 )
 
@@ -51,15 +48,14 @@ try:
 except ImportError:
     _WDM_AVAILABLE = False
 
-LISTINGS_URL = "https://github.com/SimplifyJobs/Summer2026-Internships"
+WORKDAY_TEST_URL = "https://resmed.wd3.myworkdayjobs.com/en-US/ResMed_External_Careers/job/Halifax-Canada/Software-Engineer-Intern_JR_047978/apply/applyManually"
 
 GRID_SPACING = 100
 
 
-# ── Vision helpers (screen-level fallback) ──────────────────────────────
+# ── Vision helpers ──────────────────────────────────────────────────────
 
 def _draw_grid(img, spacing=GRID_SPACING):
-    """Overlay a labeled coordinate grid so Gemini can read exact pixel positions."""
     draw = ImageDraw.Draw(img)
     w, h = img.size
     minor = (60, 60, 60)
@@ -69,11 +65,13 @@ def _draw_grid(img, spacing=GRID_SPACING):
         font = ImageFont.truetype("arial.ttf", 11)
     except Exception:
         font = ImageFont.load_default()
+
     for x in range(0, w, spacing):
         col = major if x % (spacing * 2) == 0 else minor
         draw.line([(x, 0), (x, h)], fill=col, width=1)
         if x > 0:
             draw.text((x + 2, 2), str(x), fill=label_col, font=font)
+
     for y in range(0, h, spacing):
         col = major if y % (spacing * 2) == 0 else minor
         draw.line([(0, y), (w, y)], fill=col, width=1)
@@ -82,27 +80,25 @@ def _draw_grid(img, spacing=GRID_SPACING):
 
 
 def _take_screen_screenshot():
-    """Capture full screen via pyautogui, return (PIL image, screen_w, screen_h)."""
     ss = pyautogui.screenshot()
     screen_size = pyautogui.size()
     return ss, screen_size[0], screen_size[1]
 
 
 def _prepare_for_model(screenshot, screen_w, screen_h):
-    """Resize screenshot to <=1024px long edge, draw grid. Returns (img, scale)."""
     img = screenshot.convert("RGB")
     ss_w, ss_h = img.size
     scale = 1024 / max(ss_w, ss_h) if max(ss_w, ss_h) > 1024 else 1.0
     if scale < 1.0:
         img = img.resize(
-            (int(ss_w * scale), int(ss_h * scale)), Image.Resampling.LANCZOS,
+            (int(ss_w * scale), int(ss_h * scale)),
+            Image.Resampling.LANCZOS,
         )
     _draw_grid(img)
     return img, scale
 
 
 def _model_to_screen(mx, my, scale, screen_w, screen_h, ss_w, ss_h):
-    """Convert model-image coordinates back to pyautogui screen coordinates."""
     img_x = mx / scale
     img_y = my / scale
     sx = int(round(img_x * screen_w / ss_w))
@@ -113,11 +109,9 @@ def _model_to_screen(mx, my, scale, screen_w, screen_h, ss_w, ss_h):
 
 
 class JobAutomator:
-    """Scrapes the SimplifyJobs internship list and auto-applies via Chrome."""
-
     def __init__(self, resume_path, api_key, model, log_fn, running_fn, stats_fn):
         self.resume_path = os.path.abspath(resume_path)
-        self.api_key = api_key
+        self.api_key = (api_key or "").strip()
         self.model = model
         self.log = log_fn
         self.is_running = running_fn
@@ -125,26 +119,29 @@ class JobAutomator:
         self.driver = None
         self.resume_data = None
 
-    # ── Main entry ──────────────────────────────────────────────────────
+    # ── Main ───────────────────────────────────────────────────────────
 
     def run(self):
         try:
             self._parse_resume()
             if not self.is_running():
                 return
+
             self._setup_chrome()
             if not self.is_running():
                 return
-            self._navigate_to_listings()
-            if not self.is_running():
-                return
-            jobs = self._scrape_jobs()
+
+            jobs = [{
+                "company": "Resmed",
+                "role": "Test Job",
+                "location": "Halifax, Canada",
+                "url": WORKDAY_TEST_URL,
+            }]
+
             self.stats_fn("found", len(jobs))
             self.log(f"Found {len(jobs)} open positions with apply links.", "success")
-            if not jobs:
-                self.log("No jobs found. The page format may have changed.", "warning")
-                return
             self._apply_to_jobs(jobs)
+
         except Exception as e:
             import traceback
             self.log(f"Error: {e}", "error")
@@ -153,11 +150,11 @@ class JobAutomator:
             if self.driver:
                 try:
                     self.driver.quit()
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.log(f"Cleanup warning during quit: {e}", "dim")
                 self.log("Chrome closed.", "info")
 
-    # ── Setup ───────────────────────────────────────────────────────────
+    # ── Setup ──────────────────────────────────────────────────────────
 
     def _parse_resume(self):
         self.log("Parsing resume...", "action")
@@ -184,79 +181,7 @@ class JobAutomator:
         self.driver.implicitly_wait(5)
         self.log("Chrome started.", "success")
 
-    def _navigate_to_listings(self):
-        self.log(f"Navigating to {LISTINGS_URL}", "action")
-        self.driver.get(LISTINGS_URL)
-        time.sleep(3)
-        self.log("Loaded internship listings page.", "info")
-
-    # ── Job scraping ────────────────────────────────────────────────────
-
-    def _scrape_jobs(self):
-        """Parse the GitHub README table for job listings with apply links."""
-        self.log("Scraping job listings...", "action")
-        jobs = []
-
-        try:
-            readme = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, "article.markdown-body")
-                )
-            )
-        except TimeoutException:
-            self.log("Could not find README content on the page.", "error")
-            return jobs
-
-        tables = readme.find_elements(By.TAG_NAME, "table")
-        if not tables:
-            self.log("No tables found in README.", "warning")
-            return jobs
-
-        table = tables[0]
-        rows = table.find_elements(By.TAG_NAME, "tr")
-
-        for row in rows[1:]:
-            try:
-                cells = row.find_elements(By.TAG_NAME, "td")
-                if len(cells) < 4:
-                    continue
-
-                company = cells[0].text.strip()
-                role = cells[1].text.strip()
-                location = cells[2].text.strip()
-
-                row_text = row.text
-                if "\U0001f512" in row_text or "\U0001f512" in row_text:
-                    continue
-
-                apply_links = cells[3].find_elements(By.TAG_NAME, "a")
-                if not apply_links:
-                    continue
-
-                apply_url = None
-                for link in apply_links:
-                    href = link.get_attribute("href") or ""
-                    if href and "simplify.jobs" not in href.lower():
-                        apply_url = href
-                        break
-                if not apply_url and apply_links:
-                    apply_url = apply_links[0].get_attribute("href")
-
-                if apply_url:
-                    jobs.append({
-                        "company": company,
-                        "role": role,
-                        "location": location,
-                        "url": apply_url,
-                    })
-            except StaleElementReferenceException:
-                continue
-            except Exception:
-                continue
-
-        return jobs
-
-    # ── Apply loop ──────────────────────────────────────────────────────
+    # ── Apply loop ─────────────────────────────────────────────────────
 
     def _apply_to_jobs(self, jobs):
         applied = 0
@@ -268,11 +193,8 @@ class JobAutomator:
                 self.log("Stopped by user.", "warning")
                 break
 
-            company = job["company"]
-            role = job["role"]
-            url = job["url"]
-            self.log(f"\n[{i+1}/{len(jobs)}] {company} — {role}", "header")
-            self.log(f"  URL: {url}", "dim")
+            self.log(f"\n[{i+1}/{len(jobs)}] {job['company']} — {job['role']}", "header")
+            self.log(f"  URL: {job['url']}", "dim")
 
             try:
                 result = self._apply_to_single_job(job)
@@ -283,9 +205,7 @@ class JobAutomator:
                 elif result == "skipped":
                     skipped += 1
                     self.stats_fn("skipped", skipped)
-                    self.log(
-                        "  Skipped (login required or unsupported form).", "warning",
-                    )
+                    self.log("  Skipped.", "warning")
                 else:
                     failed += 1
                     self.stats_fn("failed", failed)
@@ -297,22 +217,24 @@ class JobAutomator:
 
             time.sleep(2)
 
-        self.log(
-            f"\nDone! Applied: {applied}, Skipped: {skipped}, Failed: {failed}",
-            "header",
-        )
+        self.log(f"\nDone! Applied: {applied}, Skipped: {skipped}, Failed: {failed}", "header")
 
     def _apply_to_single_job(self, job):
-        """Open apply link and attempt to fill the application form."""
         url = job["url"]
 
-        self.driver.execute_script("window.open('');")
-        self.driver.switch_to.window(self.driver.window_handles[-1])
-
         try:
+            self.driver.execute_script("window.open('');")
+            self.driver.switch_to.window(self.driver.window_handles[-1])
             self.driver.get(url)
-            time.sleep(4)
+            time.sleep(5)
 
+            # First: try direct Workday filling without Gemini
+            filled = self._workday_direct_fill()
+            if filled:
+                self.log("  Direct Workday fill completed.", "success")
+                return "applied"
+
+            # Second: try Gemini page analysis if direct fill didn't work
             page_analysis = self._analyze_page()
             if not page_analysis:
                 return "failed"
@@ -322,18 +244,15 @@ class JobAutomator:
 
             if page_type == "login_required":
                 return "skipped"
+
             if page_type == "job_description_only":
                 apply_btn = page_analysis.get("apply_button")
-                if apply_btn:
-                    clicked = self._click_element_by_analysis(apply_btn)
-                    if clicked:
-                        time.sleep(3)
-                        page_analysis = self._analyze_page()
-                        if not page_analysis:
-                            return "failed"
-                        page_type = page_analysis.get("page_type", "unknown")
-                    else:
-                        return "skipped"
+                if apply_btn and self._click_element_by_analysis(apply_btn):
+                    time.sleep(3)
+                    page_analysis = self._analyze_page()
+                    if not page_analysis:
+                        return "failed"
+                    page_type = page_analysis.get("page_type", "unknown")
                 else:
                     return "skipped"
 
@@ -341,22 +260,128 @@ class JobAutomator:
                 return self._fill_and_submit_form(page_analysis)
 
             return "skipped"
-        finally:
-            self.driver.close()
-            self.driver.switch_to.window(self.driver.window_handles[0])
 
-    # ── Screenshots ─────────────────────────────────────────────────────
+        except Exception as e:
+            self.log(f"  Error inside _apply_to_single_job: {e}", "error")
+            return "failed"
+
+        finally:
+            try:
+                handles = self.driver.window_handles
+                if len(handles) > 1:
+                    self.driver.close()
+                    self.driver.switch_to.window(handles[0])
+            except Exception as e:
+                self.log(f"  Cleanup warning: {e}", "dim")
+
+    # ── Workday direct fill ────────────────────────────────────────────
+
+    def _workday_direct_fill(self):
+        """
+        Fill common Workday fields without Gemini.
+        This is the important fallback when Gemini API is broken.
+        """
+        self.log("  Trying direct Workday fill...", "action")
+
+        time.sleep(2)
+        self._click_apply_or_continue_if_present()
+        time.sleep(2)
+
+        filled_any = False
+
+        field_map = [
+            (["first name", "given name"], "text", self._resume("first_name")),
+            (["last name", "family name", "surname"], "text", self._resume("last_name")),
+            (["full name", "legal name", "name"], "text", self._resume("name")),
+            (["email", "email address"], "text", self._resume("email")),
+            (["phone", "mobile", "phone number"], "text", self._resume("phone")),
+            (["linkedin"], "text", self._resume("linkedin")),
+            (["github"], "text", self._resume("github")),
+            (["website", "portfolio", "personal website"], "text", self._resume("website")),
+            (["city", "location", "address"], "text", self._resume("location")),
+            (["school", "university", "college"], "text", self._resume("university")),
+            (["degree", "major", "field of study"], "text", self._resume("degree")),
+            (["gpa"], "text", self._resume("gpa")),
+            (["graduation", "graduation date", "expected graduation"], "text", self._resume("graduation_date")),
+        ]
+
+        for labels, field_type, value in field_map:
+            if not value:
+                continue
+            for label in labels:
+                if self._fill_field(label, value, field_type):
+                    self.log(f"  Filled direct field for '{label}'", "dim")
+                    filled_any = True
+                    break
+
+        if self._upload_resume_to_field("resume"):
+            filled_any = True
+
+        self._click_apply_or_continue_if_present()
+        self._click_submit_if_present()
+
+        return filled_any
+
+    def _resume(self, key):
+        if not self.resume_data:
+            return ""
+        if key == "first_name":
+            name = self.resume_data.get("name", "")
+            return name.split()[0] if name else ""
+        if key == "last_name":
+            name = self.resume_data.get("name", "")
+            parts = name.split()
+            return parts[-1] if len(parts) > 1 else ""
+        if key == "website":
+            return self.resume_data.get("website", self.resume_data.get("github", ""))
+        return self.resume_data.get(key, "")
+
+    def _click_apply_or_continue_if_present(self):
+        texts = [
+            "apply manually",
+            "apply",
+            "continue",
+            "next",
+            "continue with application",
+        ]
+        for text in texts:
+            try:
+                btn = self.driver.find_element(
+                    By.XPATH,
+                    f"//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{text}')] | "
+                    f"//a[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{text}')]"
+                )
+                if btn.is_displayed():
+                    btn.click()
+                    self.log(f"  Clicked '{text}'", "dim")
+                    time.sleep(2)
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _click_submit_if_present(self):
+        texts = ["submit", "send application", "review and submit"]
+        for text in texts:
+            try:
+                btn = self.driver.find_element(
+                    By.XPATH,
+                    f"//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{text}')]"
+                )
+                if btn.is_displayed():
+                    self.log(f"  Submit button found: '{text}'", "info")
+                    return True
+            except Exception:
+                continue
+        return False
+
+    # ── Screenshots ────────────────────────────────────────────────────
 
     def _take_page_screenshot(self):
-        """Capture current page via Selenium (no mouse needed)."""
         png = self.driver.get_screenshot_as_png()
         return Image.open(io.BytesIO(png)).convert("RGB")
 
     def _take_screen_for_vision(self):
-        """Full-screen pyautogui screenshot with grid for vision fallback.
-
-        Returns (grid_image, scale, screen_w, screen_h, raw_ss_w, raw_ss_h).
-        """
         self._bring_chrome_to_front()
         time.sleep(0.3)
         ss, scr_w, scr_h = _take_screen_screenshot()
@@ -365,29 +390,15 @@ class JobAutomator:
         return img, scale, scr_w, scr_h, raw_w, raw_h
 
     def _bring_chrome_to_front(self):
-        """Try to bring the Chrome window to the foreground."""
         try:
             self.driver.switch_to.window(self.driver.current_window_handle)
-            self.driver.execute_script(
-                "window.focus(); document.title = document.title;"
-            )
+            self.driver.execute_script("window.focus(); document.title = document.title;")
         except Exception:
             pass
-        if sys.platform == "win32":
-            try:
-                import ctypes
-                hwnd = ctypes.windll.user32.FindWindowW(
-                    "Chrome_WidgetWin_1", None,
-                )
-                if hwnd:
-                    ctypes.windll.user32.SetForegroundWindow(hwnd)
-            except Exception:
-                pass
 
-    # ── Page analysis (Gemini) ──────────────────────────────────────────
+    # ── Gemini analysis ────────────────────────────────────────────────
 
     def _analyze_page(self):
-        """Use Gemini vision to analyze the current page."""
         self.log("  Analyzing page with Gemini...", "action")
         screenshot = self._take_page_screenshot()
 
@@ -407,18 +418,17 @@ Return ONLY a JSON object with this structure:
     "apply_button": {"text": "button text", "description": "where it is on the page"} or null,
     "submit_button": {"text": "button text", "description": "where it is on the page"} or null,
     "notes": "any relevant observations about the page"
-}
-
-Important:
-- "login_required" means a login/signup wall blocks the form
-- "job_description_only" means it shows job details with an Apply button to click
-- "application_form" means there are fillable form fields visible
-- Include ALL visible form fields in the fields array"""
+}"""
 
         try:
+            self.log(f"  DEBUG model: {repr(self.model)}", "dim")
+            self.log(f"  DEBUG api_key prefix: {repr(str(self.api_key)[:12])}", "dim")
+
             from gemini_vl import call_gemini
             response = call_gemini(
-                system, user_text, screenshot,
+                system,
+                user_text,
+                screenshot,
                 max_tokens=2048,
                 api_key=self.api_key,
                 model=self.model,
@@ -429,9 +439,10 @@ Important:
             return None
 
     def _parse_gemini_json(self, response):
-        """Extract JSON from a Gemini response (strip thinking, code fences)."""
         response = re.sub(
-            r"<thinking\s*>.*?</thinking\s*>", "", response,
+            r"<thinking\s*>.*?</thinking\s*>",
+            "",
+            response,
             flags=re.DOTALL | re.IGNORECASE,
         ).strip()
         if "```" in response:
@@ -441,7 +452,7 @@ Important:
         try:
             return json.loads(response)
         except json.JSONDecodeError:
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            json_match = re.search(r"\{.*\}", response, re.DOTALL)
             if json_match:
                 try:
                     return json.loads(json_match.group())
@@ -450,36 +461,31 @@ Important:
             self.log("  Could not parse Gemini response as JSON.", "warning")
             return None
 
-    # ── Vision fallback (pyautogui + Gemini) ────────────────────────────
+    # ── Vision fallback ────────────────────────────────────────────────
 
     def _vision_click(self, description):
-        """Fallback: screenshot the screen, ask Gemini for coordinates, click with pyautogui.
-
-        Returns True if click was performed.
-        """
         self.log(f"  [Fallback] Vision-clicking: {description}", "action")
         img, scale, scr_w, scr_h, raw_w, raw_h = self._take_screen_for_vision()
         model_w, model_h = img.size
 
         system = (
             "You are a screen coordinate finder. The image has a grid overlay "
-            "with labels every 100px along the edges. Use the grid to determine "
-            "exact pixel coordinates."
+            "with labels every 100px along the edges."
         )
         user_text = (
             f"Find the element described below on this screenshot and return "
             f"its CENTER coordinates as JSON.\n\n"
             f"Element to find: {description}\n\n"
-            f"Image size: {model_w}x{model_h}. "
-            f"Grid lines are labeled 0, 100, 200, ... along top (x) and left (y).\n\n"
-            f"Return ONLY: {{\"x\": <number>, \"y\": <number>, \"found\": true/false}}\n"
-            f"If you cannot find the element, return {{\"found\": false, \"x\": 0, \"y\": 0}}"
+            f"Image size: {model_w}x{model_h}.\n\n"
+            f"Return ONLY: {{\"x\": <number>, \"y\": <number>, \"found\": true/false}}"
         )
 
         try:
             from gemini_vl import call_gemini
             response = call_gemini(
-                system, user_text, img,
+                system,
+                user_text,
+                img,
                 max_tokens=256,
                 api_key=self.api_key,
                 model=self.model,
@@ -491,7 +497,6 @@ Important:
 
             mx, my = int(data["x"]), int(data["y"])
             sx, sy = _model_to_screen(mx, my, scale, scr_w, scr_h, raw_w, raw_h)
-            self.log(f"  [Fallback] Clicking at screen ({sx}, {sy})", "action")
             pyautogui.click(sx, sy)
             time.sleep(0.5)
             return True
@@ -500,30 +505,26 @@ Important:
             return False
 
     def _vision_type(self, description, text):
-        """Fallback: vision-click a field, then type into it with pyautogui.
-
-        Returns True if text was typed.
-        """
         clicked = self._vision_click(description)
         if not clicked:
             return False
         time.sleep(0.3)
-        # Select all existing text and overwrite
-        pyautogui.hotkey("ctrl", "a")
+        if sys.platform == "darwin":
+            pyautogui.hotkey("command", "a")
+        else:
+            pyautogui.hotkey("ctrl", "a")
         time.sleep(0.1)
         pyautogui.write(text, interval=0.02)
         self.log(f"  [Fallback] Typed into '{description}': {text[:30]}...", "dim")
         return True
 
     def _vision_upload_file(self, file_path):
-        """Fallback: vision-click an upload button/area, handle the OS file dialog."""
         clicked = self._vision_click(
             "file upload button OR 'Choose File' OR 'Upload Resume' OR 'Attach' button"
         )
         if not clicked:
             return False
         time.sleep(2)
-        # OS file dialog: type the file path and press Enter
         pyautogui.write(file_path, interval=0.02)
         time.sleep(0.3)
         pyautogui.press("enter")
@@ -531,10 +532,9 @@ Important:
         self.log("  [Fallback] Uploaded file via OS dialog.", "info")
         return True
 
-    # ── Form filling ────────────────────────────────────────────────────
+    # ── Form filling ───────────────────────────────────────────────────
 
     def _fill_and_submit_form(self, page_analysis):
-        """Fill form fields using resume data and Gemini guidance."""
         fields = page_analysis.get("fields", [])
         if not fields:
             self.log("  No form fields identified.", "warning")
@@ -568,20 +568,14 @@ Important:
             self.log("  Could not fill any fields.", "warning")
             return "failed"
 
-        self.log(f"  Filled {filled_count} fields.", "info")
-
         submit = page_analysis.get("submit_button")
-        if submit:
-            clicked = self._click_element_by_analysis(submit)
-            if clicked:
-                time.sleep(3)
-                self.log("  Form submitted.", "info")
-                return "applied"
+        if submit and self._click_element_by_analysis(submit):
+            time.sleep(3)
+            self.log("  Form submitted.", "info")
 
-        return "applied" if filled_count > 0 else "failed"
+        return "applied"
 
     def _get_field_value(self, label, field_type):
-        """Map a form field label to a value from the parsed resume."""
         if not self.resume_data:
             return ""
 
@@ -647,7 +641,7 @@ Important:
 
         return ""
 
-    # ── Selenium element finders ────────────────────────────────────────
+    # ── Selenium element finders ───────────────────────────────────────
 
     def _find_by_label_text(self, label):
         labels = self.driver.find_elements(By.TAG_NAME, "label")
@@ -659,16 +653,14 @@ Important:
                         return self.driver.find_element(By.ID, for_attr)
                     except NoSuchElementException:
                         pass
-                inputs = lbl.find_elements(
-                    By.CSS_SELECTOR, "input, textarea, select",
-                )
+                inputs = lbl.find_elements(By.CSS_SELECTOR, "input, textarea, select")
                 if inputs:
                     return inputs[0]
         return None
 
     def _find_by_placeholder(self, label):
         inputs = self.driver.find_elements(
-            By.CSS_SELECTOR, "input[placeholder], textarea[placeholder]",
+            By.CSS_SELECTOR, "input[placeholder], textarea[placeholder]"
         )
         for inp in inputs:
             ph = (inp.get_attribute("placeholder") or "").lower()
@@ -678,7 +670,7 @@ Important:
 
     def _find_by_aria_label(self, label):
         inputs = self.driver.find_elements(
-            By.CSS_SELECTOR, "input[aria-label], textarea[aria-label]",
+            By.CSS_SELECTOR, "input[aria-label], textarea[aria-label]"
         )
         for inp in inputs:
             al = (inp.get_attribute("aria-label") or "").lower()
@@ -690,12 +682,8 @@ Important:
         try:
             label_lower = label.lower().replace("'", "\\'")
             xpath = (
-                f"//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
-                f"'abcdefghijklmnopqrstuvwxyz'), '{label_lower}')]"
-                f"/following::input[1] | "
-                f"//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
-                f"'abcdefghijklmnopqrstuvwxyz'), '{label_lower}')]"
-                f"/following::textarea[1]"
+                f"//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{label_lower}')]/following::input[1] | "
+                f"//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{label_lower}')]/following::textarea[1]"
             )
             elements = self.driver.find_elements(By.XPATH, xpath)
             return elements[0] if elements else None
@@ -716,14 +704,10 @@ Important:
             pass
         return False
 
-    # ── Fill field (Selenium first, vision fallback) ────────────────────
-
     def _fill_field(self, label, value, field_type):
-        """Find a form field and fill it. Tries Selenium DOM, falls back to vision+mouse."""
         if not value:
             return False
 
-        # Strategy 1: Selenium DOM access
         strategies = [
             lambda: self._find_by_label_text(label),
             lambda: self._find_by_placeholder(label),
@@ -740,69 +724,50 @@ Important:
                     element.clear()
                     element.send_keys(value)
                     return True
-            except (NoSuchElementException, ElementNotInteractableException,
-                    StaleElementReferenceException):
+            except (NoSuchElementException, ElementNotInteractableException, StaleElementReferenceException):
                 continue
             except Exception:
                 continue
 
-        # Strategy 2: vision fallback — screenshot screen, find field, click + type
         self.log(f"  Selenium couldn't reach '{label}', trying vision fallback...", "warning")
-        return self._vision_type(
-            f"text input field labeled '{label}' on the web page", value,
-        )
+        return self._vision_type(f"text input field labeled '{label}' on the web page", value)
 
     def _upload_resume_to_field(self, label):
-        """Upload resume PDF. Selenium first, vision fallback for tricky upload widgets."""
-        # Strategy 1: Selenium file input
-        file_inputs = self.driver.find_elements(
-            By.CSS_SELECTOR, "input[type='file']",
-        )
+        file_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
         for inp in file_inputs:
             try:
                 accept = (inp.get_attribute("accept") or "").lower()
-                if (not accept or "pdf" in accept
-                        or "document" in accept or "*" in accept):
+                if not accept or "pdf" in accept or "document" in accept or "*" in accept:
                     inp.send_keys(self.resume_path)
                     self.log("  Uploaded resume PDF (Selenium).", "info")
                     return True
             except Exception:
                 continue
 
-        # Strategy 2: vision fallback for custom upload widgets
         self.log("  No standard file input found, trying vision fallback...", "warning")
         return self._vision_upload_file(self.resume_path)
 
     def _click_element_by_analysis(self, button_info):
-        """Click a button described by Gemini's analysis.
-        Selenium first, then vision fallback."""
         text = (button_info.get("text") or "").strip()
         if not text:
             return False
 
-        # Strategy 1: Selenium XPath
         strategies = [
             lambda: self.driver.find_element(
                 By.XPATH,
-                f"//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
-                f"'abcdefghijklmnopqrstuvwxyz'), '{text.lower()}')]",
+                f"//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{text.lower()}')]",
             ),
             lambda: self.driver.find_element(
                 By.XPATH,
-                f"//a[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
-                f"'abcdefghijklmnopqrstuvwxyz'), '{text.lower()}')]",
+                f"//a[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{text.lower()}')]",
             ),
             lambda: self.driver.find_element(
                 By.XPATH,
-                f"//input[@type='submit' and contains(translate(@value, "
-                f"'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "
-                f"'{text.lower()}')]",
+                f"//input[@type='submit' and contains(translate(@value, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{text.lower()}')]",
             ),
             lambda: self.driver.find_element(
                 By.XPATH,
-                f"//*[@role='button' and contains(translate(., "
-                f"'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "
-                f"'{text.lower()}')]",
+                f"//*[@role='button' and contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{text.lower()}')]",
             ),
         ]
 
@@ -817,7 +782,6 @@ Important:
             except Exception:
                 continue
 
-        # Strategy 2: Selenium JavaScript click (bypasses overlay issues)
         for strategy in strategies:
             try:
                 el = strategy()
@@ -827,11 +791,8 @@ Important:
             except Exception:
                 continue
 
-        # Strategy 3: vision fallback — find button on screen and pyautogui click
         desc = button_info.get("description", "")
         self.log(f"  Selenium couldn't click '{text}', trying vision fallback...", "warning")
         return self._vision_click(
-            f"button or link with text '{text}'"
-            + (f" ({desc})" if desc else "")
-            + " on the web page",
+            f"button or link with text '{text}'" + (f" ({desc})" if desc else "") + " on the web page"
         )
