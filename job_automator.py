@@ -327,7 +327,7 @@ Notes:
 - **Education/Degree**: If the field asks for "Field of Study" or "Major", use "Aerospace Engineering".
 - **Search Boxes**: Some dropdowns require you to type a value into an `<input data-automation-id='searchBox'>` and then select a result. For these, use `"action": "select"` and target the search input itself. The engine will handle the typing.
 - **Custom Dropdowns**: Workday often uses `<button>` elements with `aria-haspopup="listbox"` instead of standard `<select>` tags. You should still use the `"action": "select"` for these, targeting the button element.
-- **Error Handling**: If you see error messages (like `<p data-automation-id="inputAlert">Error...</p>`), prioritize actions to fix those specific fields.
+- **Error Handling**: If you see error messages (like `<p data-automation-id="inputAlert">Error...</p>` or a div saying 'Must end after start date'), prioritize actions to fix those specific fields. If an end date is before a start date, increase the end date by 1 year to make it valid.
 - **Checkboxes**: Workday checkboxes are often hidden or intercepted. Always target the actual `<input type="checkbox">` tag. Use `action: "click"`. Good XPaths are `//input[@type='checkbox']` or specific IDs like `//input[@id='termsAndConditions--acceptTermsAndAgreements']`. Do NOT target the `<label>`.
 - **Click Interception**: Sometimes a `<div>` with `role='button'` and a `data-automation-id` like 'click_filter' will cover the actual form submission button. When you see this pattern for 'Create Account' or 'Submit', target the covering `<div>` for the click action.
 - **IMPORTANT**: On 'Create Account' pages, the agreement checkbox is an `<input>` tag. Target it directly with `//input[@data-automation-id='createAccountCheckbox']`.
